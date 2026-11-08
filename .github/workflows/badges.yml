@@ -41,6 +41,7 @@ jobs:
       - name: Publish contribution badges
         uses: ./
         with:
+          cache: 'true'
           binary: target/release/git-credit
           source-branch: main
           publish-branch: badges

@@ -7,6 +7,9 @@
 name: git-credit
 description: Render fair per-author ownership and labor badges from committed history
 inputs:
+  cache:
+    description: Restore and save incremental replay state (contains historical provenance)
+    default: 'true'
   version:
     description: Release tag to download, or latest
     default: latest
@@ -49,6 +52,20 @@ runs:
         GC_VERSION: ${{ inputs.version }}
         GC_BINARY: ${{ inputs.binary }}
       run: bash "$GITHUB_ACTION_PATH/tools/action-download.sh"
+    - name: Select replay cache directory
+      id: replay-cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        printf 'directory=%s/git-credit/cache\n' "$(git rev-parse --absolute-git-dir)" >> "$GITHUB_OUTPUT"
+    - name: Restore and save replay cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.replay-cache.outputs.directory }}
+        key: git-credit-${{ github.repository }}-${{ runner.os }}-algorithm-4-${{ github.sha }}
+        restore-keys: |
+          git-credit-${{ github.repository }}-${{ runner.os }}-algorithm-4-
     - name: Render contribution badges
       shell: bash
       env:
@@ -56,9 +73,15 @@ runs:
         GC_OUT_DIR: ${{ inputs.out-dir }}
         GC_STYLE: ${{ inputs.styles }}
         GC_TOP: ${{ inputs.top }}
+        GC_CACHE: ${{ inputs.cache }}
+        GC_CACHE_DIR: ${{ steps.replay-cache.outputs.directory }}
       run: |
         set -euo pipefail
-        "$GC_BINARY" badge . --out-dir "$GC_OUT_DIR" --style "$GC_STYLE" --top "$GC_TOP"
+        cache_args=(--cache-dir "$GC_CACHE_DIR")
+        if [ "$GC_CACHE" != true ]; then
+          cache_args=(--no-cache)
+        fi
+        "$GC_BINARY" badge . --out-dir "$GC_OUT_DIR" --style "$GC_STYLE" --top "$GC_TOP" "${cache_args[@]}"
     - name: Publish generated assets
       if: inputs.publish-branch != ''
       shell: bash
