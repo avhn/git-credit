@@ -1,0 +1,16 @@
+[package]
+name = "credit-core"
+description = "Pure attribution engine for git-credit: normalization, diffing and credit accounting over in-memory inputs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["git", "blame", "authorship", "attribution"]
+categories = ["development-tools"]
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "git-credit"
+description = "Fair git authorship stats: ownership and labor per author that formatting and trivial edits cannot steal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["git", "blame", "contributors", "cli", "badges"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap.workspace = true
+credit-core.workspace = true
+credit-git.workspace = true
+
+[lints]
+workspace = true

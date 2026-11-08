@@ -1,0 +1,17 @@
+[package]
+name = "credit-git"
+description = "Repository access for git-credit: history walking, renames, mailmap and co-author trailers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["git", "blame", "authorship", "history"]
+categories = ["development-tools"]
+
+[dependencies]
+credit-core.workspace = true
+
+[lints]
+workspace = true

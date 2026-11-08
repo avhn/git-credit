@@ -1,0 +1,4 @@
+# Local shortcuts that mirror the CI gates, so `cargo lint` locally fails exactly
+# where the static job would.
+[alias]
+lint = "clippy --workspace --all-targets --locked -- -D warnings -A clippy::module_name_repetitions -A clippy::must_use_candidate"
