@@ -43,16 +43,22 @@ use std::fmt;
 pub const ALGORITHM_VERSION: u32 = 2;
 
 mod engine;
+mod lexer;
 mod model;
 mod moves;
 mod parents;
+mod token_engine;
 
 pub use engine::{Change, ChangeKind, apply_change};
+pub use lexer::{PUNCTUATION_WEIGHT, TOKEN_WEIGHT, Token, TokenKind, tokenize};
 pub use model::{
     AuthorId, FileState, LaborDelta, Ledger, Line, LineOwner, NormalizationMode, Policy, SCALE,
 };
 pub use moves::{reconcile_merge_moves, reconcile_moves};
 pub use parents::{adopt_parent, reconcile_parents};
+pub use token_engine::{
+    OwnedToken, TokenChange, TokenState, apply_token_change, discount_bulk_edits,
+};
 
 /// Errors produced by the attribution engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
