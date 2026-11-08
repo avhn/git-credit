@@ -15,28 +15,83 @@ use crate::{Change, LineOwner};
 pub fn reconcile_moves(changes: &mut [(String, Change)]) -> usize {
     let mut order: Vec<_> = (0..changes.len()).collect();
     order.sort_by_key(|&i| changes.get(i).map(|(path, _)| path.clone()));
+    let mut seen = std::collections::BTreeMap::new();
+    let sources = move_sources(changes, &mut seen);
+    reconcile_sources(changes, &order, sources)
+}
+
+/// Reconcile cross-file moves using removals from every merge parent. Additional
+/// parent diffs are source-only: their output states and labor are ignored.
+/// Call once per merge, before accumulating labor. First-parent sources take
+/// precedence, followed by parents in supplied order. Overlapping normalized
+/// text occurrences at the same path are counted once across parents, preventing
+/// shared ancestry from funding copies. This conservative union can fragment
+/// overlapping blocks; the ordinary three-consecutive-line minimum still applies.
+pub fn reconcile_merge_moves(
+    changes: &mut [(String, Change)],
+    parents: &[Vec<(String, Change)>],
+) -> usize {
+    let mut seen = std::collections::BTreeMap::new();
+    let mut sources = move_sources(changes, &mut seen);
+    for parent in parents {
+        sources.extend(move_sources(parent, &mut seen));
+    }
+    let mut order: Vec<_> = (0..changes.len()).collect();
+    order.sort_by_key(|&i| changes.get(i).map(|(path, _)| path.clone()));
+    reconcile_sources(changes, &order, sources)
+}
+
+/// Union removed occurrences conservatively, splitting blocks at prior sources.
+fn move_sources(
+    changes: &[(String, Change)],
+    seen: &mut std::collections::BTreeMap<(String, String), usize>,
+) -> Vec<Source> {
     let mut sources = Vec::new();
-    for &index in &order {
-        if let Some((path, change)) = changes.get(index) {
-            for block in &change.removed {
+    let mut counts = std::collections::BTreeMap::new();
+    let mut order: Vec<_> = changes.iter().collect();
+    order.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, change) in order {
+        for block in &change.removed {
+            let mut lines = Vec::new();
+            for line in block {
+                let text = change.mode.normalize(&line.text).to_owned();
+                let key = (path.clone(), text.clone());
+                let occurrence = counts.entry(key.clone()).or_insert(0);
+                *occurrence += 1;
+                if *occurrence > seen.get(&key).copied().unwrap_or(0) {
+                    lines.push((text, line.owner.clone()));
+                } else if !lines.is_empty() {
+                    sources.push(Source {
+                        path: path.clone(),
+                        used: vec![false; lines.len()],
+                        lines: std::mem::take(&mut lines),
+                    });
+                }
+            }
+            if !lines.is_empty() {
                 sources.push(Source {
                     path: path.clone(),
-                    lines: block
-                        .iter()
-                        .map(|line| {
-                            (
-                                change.mode.normalize(&line.text).to_owned(),
-                                line.owner.clone(),
-                            )
-                        })
-                        .collect(),
-                    used: vec![false; block.len()],
+                    used: vec![false; lines.len()],
+                    lines,
                 });
             }
         }
     }
+    for (key, count) in counts {
+        let previous = seen.entry(key).or_default();
+        *previous = (*previous).max(count);
+    }
+    sources
+}
+
+/// Match staged destinations and retain only unused removal provenance.
+fn reconcile_sources(
+    changes: &mut [(String, Change)],
+    order: &[usize],
+    mut sources: Vec<Source>,
+) -> usize {
     let mut moved = 0;
-    for index in order {
+    for &index in order {
         if let Some((path, change)) = changes.get_mut(index) {
             for source in &mut sources {
                 if source.path == *path {
@@ -150,4 +205,73 @@ fn match_source(change: &mut Change, source: &mut Source) -> usize {
         }
     }
     moved
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        AuthorId, FileState, NormalizationMode, Policy, SCALE, adopt_parent, apply_change,
+    };
+
+    /// Build scored states and changes under the ordinary line-level policy.
+    fn change(previous: &FileState, text: &str, author: u32) -> Change {
+        apply_change(
+            previous,
+            text,
+            &[(AuthorId(author), SCALE)],
+            NormalizationMode::IgnoreIndentation,
+            Policy::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn adopted_removals_and_parent_union_refund_only_one_destination() {
+        let original = change(&FileState::default(), "one\ntwo\nthree\nkeep\n", 0);
+        let parent = change(&original.state, "keep\n", 1);
+        let mut adopted = change(&original.state, "keep\n", 2);
+        adopt_parent(&mut adopted, &parent.state);
+        assert_eq!(adopted.labor, std::collections::BTreeMap::new());
+        let mut staged = vec![
+            ("a.rs".into(), adopted),
+            (
+                "b.rs".into(),
+                change(&FileState::default(), "one\ntwo\nthree\n", 2),
+            ),
+            (
+                "c.rs".into(),
+                change(&FileState::default(), "one\ntwo\nthree\n", 2),
+            ),
+        ];
+        assert_eq!(
+            reconcile_merge_moves(&mut staged, &[vec![("a.rs".into(), parent)]]),
+            3
+        );
+        assert_eq!(
+            staged[1].1.state.lines[0].owner,
+            original.state.lines[0].owner
+        );
+        assert_eq!(staged[1].1.labor[&AuthorId(2)], 0);
+        assert_eq!(staged[2].1.labor[&AuthorId(2)], 3 * u64::from(SCALE));
+    }
+
+    #[test]
+    fn other_parent_supplies_sources_without_changing_its_ledger() {
+        let original = change(&FileState::default(), "one\ntwo\nthree\n", 0);
+        let removed = change(&original.state, "", 1);
+        let mut staged = vec![(
+            "b.rs".into(),
+            change(&FileState::default(), "one\ntwo\nthree\n", 2),
+        )];
+        assert_eq!(
+            reconcile_merge_moves(&mut staged, &[vec![("a.rs".into(), removed)]]),
+            3
+        );
+        assert_eq!(
+            staged[0].1.state.lines[0].owner,
+            original.state.lines[0].owner
+        );
+        assert_eq!(staged[0].1.labor[&AuthorId(2)], 0);
+    }
 }

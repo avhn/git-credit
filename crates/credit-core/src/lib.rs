@@ -40,17 +40,19 @@ use std::fmt;
 /// Reports embed this number so results computed by different releases are
 /// never silently compared. It changes whenever the same history and policy
 /// could produce different credit.
-pub const ALGORITHM_VERSION: u32 = 1;
+pub const ALGORITHM_VERSION: u32 = 2;
 
 mod engine;
 mod model;
 mod moves;
+mod parents;
 
 pub use engine::{Change, ChangeKind, apply_change};
 pub use model::{
     AuthorId, FileState, LaborDelta, Ledger, Line, LineOwner, NormalizationMode, Policy, SCALE,
 };
-pub use moves::reconcile_moves;
+pub use moves::{reconcile_merge_moves, reconcile_moves};
+pub use parents::{adopt_parent, reconcile_parents};
 
 /// Errors produced by the attribution engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
