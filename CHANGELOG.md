@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Algorithm version 3 defaults to canonical token attribution with exactly conserved
+  line-equivalent ownership and fractional insertion labor. Line granularity keeps
+  Phase 2a credit numbers unchanged; `--keep` is restricted to line mode.
+- Token moves and merge adoption preserve provenance and refund inherited work,
+  including other-parent move sources with shared-ancestry deduplication.
 - Algorithm version 2 defaults to merge-aware full-history replay. All reachable
   commits contribute labor once in deterministic parent-before-child order.
 - Merge blobs and normalized editor lines matching other parents retain parent
@@ -20,6 +25,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Language-agnostic token lexer, `--granularity line|token` and matching config,
+  commit-wide bulk-rename detection, `--no-bulk-discount` / `bulk_discount = false`,
+  JSON granularity and bulk counts, and warnings with up to five example commits.
+- Exact-share, formatting, indentation, bulk-threshold, conservation and malformed
+  input tests. Phase 2a merge fixtures now run under both granularities.
+- Reproducible Myers/histogram token-stream benchmark; Myers remains the runtime
+  choice. Histogram is a development-only comparison dependency.
 - Pure line-attribution engine with deterministic normalized diffs, bounded
   similarity pairing, fixed-point ownership and labor, co-author shares, and
   same-commit cross-file block moves. Algorithm version is now 1.
@@ -42,6 +54,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Bulk discounts now require identifier-to-identifier mappings. Repeated literal,
+  keyword, operator, indentation and comment edits retain ordinary editor credit;
+  their replacement weights still count toward the dominance denominator.
+
 - Exact merge-parent blob adoption retains removed first-parent blocks as move
   sources. Moves can also recover provenance from other parents, without counting
   shared source occurrences twice or attributing inherited moves to the merger.
@@ -55,6 +71,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Performance
 
+- Share token spellings and owners, borrow intern keys with deterministic hashing,
+  dispatch operators by first byte, and bypass Myers for disjoint vocabularies.
+  On the 2,118-commit fd benchmark, token replay stays below three times line replay.
 - Reuse one isolated raw-object diff cache per analysis, clearing transient blobs
   between commits.
 - Use exact bit-parallel LCS for long lines with bounded alphabets, cache character

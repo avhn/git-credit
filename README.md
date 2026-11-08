@@ -8,10 +8,10 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: line-level analysis available.** `analyze` reads committed HEAD and
-> reports ownership and labor using merge-aware full-history replay. Branch authors
-> keep credit through merges; token-level analysis is planned. These metrics
-> describe provenance, not a person's value.
+> **Status: Phase 2 complete.** `analyze` defaults to token-level attribution and
+> merge-aware full-history replay. Reports stay in line-equivalent units. Use
+> `--granularity line` for the legacy line rules. These metrics describe provenance,
+> not a person's value.
 
 ## Why
 
@@ -29,13 +29,18 @@ disappears from the numbers entirely.
 
 Attribution rules:
 
-- **Formatting is free within the normalization rules.** Trailing whitespace and
-  CRLF changes earn no credit and take none away. Leading indentation is ignored
-  only when the language permits it. Interior whitespace and line wrapping can
-  still be meaningful changes in the line-level engine.
-- **Small edits keep the original author.** A line that changes only slightly stays
-  with its author; the editor gets labor for the change, not ownership of the line.
-  The similarity threshold is configurable. Later versions attribute individual tokens.
+- **Unchanged tokens keep their authors.** Only inserted and replaced tokens belong
+  to the editor. Changing one of ten equal-weight tokens earns 0.1 line of labor,
+  not ownership of the entire line. Every meaningful output line counts as one
+  ownership unit, divided by its tokens' weights.
+- **Formatting is free within the lexical rules.** Rewrapping, joining lines and
+  adding a trailing comma earn no labor. String contents remain meaningful, as
+  does indentation in Python and other indentation-sensitive files.
+- **Bulk renames preserve provenance.** A dominant replacement mapping repeated
+  at least five times retains token owners and earns one labor line per mapping
+  per file. Reports identify discounted commits; `--no-bulk-discount` disables it.
+- **Legacy line rules remain available.** `--granularity line` preserves the
+  configurable similarity threshold and Phase 2a ownership/labor numbers.
 - **Moved and renamed code keeps its author.**
 - **Merges preserve branch provenance.** Each reachable commit contributes labor
   once; inherited parent content does not earn the merge author new labor.
@@ -48,13 +53,13 @@ Attribution rules:
 ```console
 $ cargo run --locked -- analyze .
 $ cargo run --locked -- analyze ../another-repository --json > credit.json
-$ cargo run --locked -- analyze . --keep 0.80 --exclude 'generated/**' --depth 2
+$ cargo run --locked -- analyze . --granularity line --keep 0.80 --exclude 'generated/**' --depth 2
 $ cargo install --path crates/git-credit --locked
 $ git-credit analyze --quiet --no-color
 ```
 
 The table shows `AUTHOR`, `OWNERSHIP %`, `OWNED LINES` and `LABOR`, sorted by
-ownership descending. The footer identifies HEAD, commit count, walk mode and
+ownership descending. The footer identifies HEAD, commit count, walk mode, granularity and
 algorithm version. JSON adds per-directory ownership and the effective policy;
 see [the versioned contract](docs/json.md). Output is plain text, including when
 piped. `--quiet` suppresses warnings on stderr, while `-v` enables diagnostics.
@@ -66,8 +71,10 @@ Bare repositories are supported. Symlinks, submodules, binaries and files over
 1 MiB are skipped; the file-size limit is configurable. This build supports
 SHA-1 repositories. Use `--first-parent` for the legacy chain-only analysis, which
 credits new branch content in merge diffs to the merge author and co-authors.
-Full mode matches exact blobs and normalized inserted or rewritten lines from
-merge parents; unmatched lines are merge-resolution work.
+Full mode matches exact blobs and inserted tokens (or normalized lines in line
+mode) from merge parents; unmatched content is merge-resolution work. The lexer
+is language-agnostic, not a syntax parser; quoted strings stop at physical line
+ends and tabs use eight-column indentation stops.
 
 ### Configuration
 
@@ -75,14 +82,18 @@ Optional `.git-credit.toml` at the repository root:
 
 ```toml
 walk = "full" # Use "first-parent" for legacy merge attribution.
-keep = 0.70
+granularity = "token" # Use "line" for Phase 2a attribution.
+bulk_discount = true
+keep = 0.70 # Used only with line granularity.
 group_by = "name" # Use "email" to keep different addresses separate.
 exclude = ["generated/**", "fixtures/**"]
 opt_out = ["private@example.test"]
 max_file_size = 1048576
 ```
 
-Explicit `--keep` overrides config; `--first-parent` overrides the configured walk. Repeated `--exclude` flags replace config
+`--granularity` overrides config; `--no-bulk-discount` disables the configured
+discount. Explicit `--keep` requires line granularity and overrides config there.
+`--first-parent` overrides the configured walk. Repeated `--exclude` flags replace config
 exclusions; built-in lockfile, vendor, node_modules, dist, minified and source-map
 exclusions remain active. Thresholds are rounded to per-mille precision.
 `--depth` defaults to 1; zero disables directory reporting. Names are grouped by
@@ -146,7 +157,7 @@ tools/           repository policy scripts and their tests
 | ----- | ----------------------------------------------------------------------------------------- | ----------- |
 | 0     | Workspace, CI on Linux, Windows and macOS, policy checks, licensing                       | Done        |
 | 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
-| 2     | Token-level attribution with tree-sitter, merge-aware history, bulk-edit detection        | Merges done; tokens and bulk edits planned |
+| 2     | Language-agnostic token attribution, merge-aware history, bulk-edit detection             | Done |
 | 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Planned     |
 | 4     | SVG badges and cards, shields.io endpoint, reusable GitHub Action                         | Planned     |
 

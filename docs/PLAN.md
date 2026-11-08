@@ -38,7 +38,7 @@ flowchart LR
 | `credit-core` | Normalization, diff, attribution, aggregation over in-memory inputs; no I/O | `similar` (from Phase 1)       |
 | `credit-git`  | Object access, commit walk, rename detection, `.mailmap`, trailers          | `gix`                          |
 | `git-credit`  | CLI, configuration, orchestration, table, JSON and SVG output               | `clap`, `serde`, `toml`, `globset` |
-| `credit-syntax` (Phase 2) | tree-sitter adapters producing core token streams              | `tree-sitter` and grammars     |
+| Token lexer in `credit-core` (Phase 2b) | Language-independent canonical tokens | No additional dependencies |
 
 ### Dependency decisions
 
@@ -49,10 +49,10 @@ flowchart LR
   is a recorded exception. std has no diff algorithm; writing and maintaining a
   correct Myers or histogram diff is a project of its own. `similar` is
   Apache-2.0, widely used (it backs `insta`), maintained, and has no required
-  dependencies. Before token attribution (Phase 2) it is benchmarked against
-  `imara-diff` (histogram, interned inputs) on ordinary edits, repetitive tokens,
-  generated files and near-total rewrites; the choice and its tie-breaking are then
-  frozen into the algorithm version.
+  dependencies. Phase 2b benchmarks below compare it with `imara-diff` histogram
+  on ordinary edits, repetitive tokens, generated files and near-total rewrites.
+  Myers remains the runtime choice; deterministic tie-breaking is part of
+  algorithm version 3.
 - All dependencies must pass `cargo deny` (permissive licenses only, crates.io only).
 
 ## Attribution model
@@ -254,7 +254,7 @@ doing any work and fails with the command that fixes it
 ## Report contract
 
 `--json` output carries a schema version, `ALGORITHM_VERSION`, the analyzed `HEAD`,
-the walk mode (`full` or `first-parent`), the policy settings, units (`lines` in Phase 1),
+the walk mode (`full` or `first-parent`), granularity, policy settings, units (`lines`),
 warnings, per-author ownership and labor, and per-directory breakdowns. The shape is
 documented in [json.md](json.md). Per-author and directory shares are fractions
 in 0..=1; table output converts them to percentages. Directory depth defaults to
@@ -289,8 +289,138 @@ bounded retained states, legacy walk selection and algorithm version 2. Fixtures
 cover branch merges, conflict-resolution lines, criss-cross ancestry, octopus
 merges, legacy numbers, linear-history equivalence and ownership conservation.
 
-Planned: `credit-syntax` with tree-sitter (Rust, JavaScript and TypeScript first),
-token attribution, and bulk find-and-replace detection with a visible discount.
+Phase 2b is implemented. Algorithm version 3 defaults to token-level attribution
+with line-equivalent ownership and labor. `--granularity line` (or config
+`granularity = "line"`) reproduces Phase 2a credit numbers; `--keep` applies only
+there. CLI granularity overrides config. `--no-bulk-discount` and config
+`bulk_discount = false` disable token bulk preservation and its fixed labor charge.
+
+```mermaid
+flowchart LR
+    subgraph Before[Phase 2a]
+        L[Physical lines] --> LD[Line diff and similarity]
+        LD --> LR[Parent and move refunds]
+        LR --> LL[Line ledger]
+    end
+    subgraph After[Phase 2b default]
+        T[Canonical tokens] --> TD[Interned token diff]
+        TD --> TR[Parent, move and bulk reconciliation]
+        TR --> TL[Weighted line-equivalent ledger]
+    end
+```
+
+Owner-approved plan change: use a language-agnostic lexer in `credit-core` instead
+of tree-sitter for now. It covers common lexical forms across most languages,
+avoids native C grammar builds on three operating systems, and keeps the lexer
+dependency-free. Core's existing `similar` exception remains; no new parser or
+runtime dependency is added. Tree-sitter adapters remain a possible later
+refinement rather than a prerequisite for token attribution.
+
+The lexer uses Unicode alphanumeric words (including `_` and `$`), numbers,
+line-bounded escaped strings, comment words and maximal-munch common operators.
+Word, number and string weights are 1000, punctuation 250, and commas before closing
+brackets zero. Significant indentation contributes a width token on nonblank lines;
+tabs advance to eight-column stops. Blank lines remain weightless. Canonical keys
+use text spelling or indentation width, not lexical category: removing a comment
+marker does not transfer an unchanged numeric token. Zero-weight commas are
+excluded from diff streams. Comment quotes remain punctuation, not string literals.
+
+Unchanged canonical tokens retain their full provenance. New tokens belong to the
+editor; deleted tokens disappear without labor. Each meaningful output line is
+exactly one ownership unit, split by token weights. Author contributions are summed
+before cumulative integer division in author-ID order, conserving exactly 1,000,000
+units per line. Labor is inserted weight divided by total line weight, rounded down
+to millionths, then split among editors with conserved rounding. Rewrapping can
+change the total number of ownership lines without transferring any token owner.
+
+Bulk detection pairs equal-length replacement hunks, including single-token hunks
+isolated by equal anchors. Only identifier-to-identifier mappings qualify. Literal
+names and common language keywords, numeric/string literals, comment words,
+operators, punctuation and indentation cannot receive a bulk discount. These
+ineligible replacements still count in the 60% denominator; occurrence-level
+eligibility is checked again when restoring owners. A mapping needs five occurrences
+and 60% of all replaced
+new-token weight across the supplied commit, including unpaired replacement hunks.
+Discounted tokens retain owners and incur one labor line per mapping per file.
+Repeated reconciliation is idempotent; disabling it before reconciliation leaves
+ordinary token attribution unchanged.
+
+Exact parent blob adoption clears editor candidates without discarding first-parent
+removals. Other parents restore inserted canonical tokens in Git parent order, then
+earliest token order, matching the existing non-consuming provenance rule. Only
+remaining insertions earn labor. Canonical cross-file move runs require at least
+three complete meaningful lines on both sides; blanks may bridge them. Explicit
+line-boundary metadata prevents partial changed lines from inflating the minimum.
+Removed occurrences at a path are conservatively deduplicated across parents;
+sources are consumed once and parent-only source diffs never contribute labor.
+Parent and move refunds precede bulk detection, including its weight denominator.
+The staged token API makes repeated reconciliation idempotent.
+
+Replay shares immutable token file states through the same `Arc` path maps and
+remaining-child release schedule as line states. Reports add `granularity`,
+`bulk_edit_commits`, effective `policy.bulk_discount`, and a warning with up to five
+full commit IDs in deterministic replay order. Schema version stays 1, units remain
+`lines`, and algorithm version is 3 for both granularities. All Phase 2a merge
+fixtures run in both modes. Token-specific fixtures cover formatting, exact shares,
+indentation, bulk detection, config overrides and bounded diagnostics.
+
+#### Diff selection and measurements
+
+Keep `similar` Myers for runtime token diffs. The existing dependency exception
+still applies: std has no diff implementation; maintaining a correct and efficient
+Myers implementation locally is not justified. `similar` 2.7 is Apache-2.0,
+maintained and used by `insta`, with no required dependencies in this configuration.
+`imara-diff` 0.2 (Apache-2.0, upstream pascalkuthe/imara-diff) is development-only,
+with default features disabled, so the comparison remains reproducible without
+adding a second runtime diff implementation. Its package/license metadata and
+transitive dependencies pass the same dependency gate.
+
+Run `cargo bench -p credit-core --bench token_diff --locked`. Measurements on
+2026-11-09, Windows 11 x64, release build, five fixed iterations per workload,
+arithmetic mean milliseconds per diff, pre-interned inputs, no lexer/I/O time:
+
+| Workload | Tokens | similar Myers | imara histogram |
+| --- | ---: | ---: | ---: |
+| Ordinary, replace every 101st unique token | 12,000 | 0.370 | 1.348 |
+| Repetitive, seven-symbol stream, replace every 37th | 12,000 | 1.699 | 73.738 |
+| Generated, repeated eleven-token blocks, changed anchors | 30,000 | 68.538 | 348.411 |
+| Near-total rewrite, retain one token per 1,000 | 8,000 | 635.895 | 0.083 |
+| Fully disjoint rewrite | 8,000 | 363.604 | 0.044 |
+
+Myers wins the ordinary and repetitive workloads; histogram wins large rewrites.
+Production detects disjoint vocabularies during interning and emits the exact
+single replacement without invoking Myers. Near-total rewrites with shared tokens
+remain a known worst case, not hidden by time-based deadlines or approximate
+fallbacks. The fd end-to-end target below is met with Myers. Intern IDs follow
+encounter order, never hash iteration. Explicit deterministic hashing avoids
+random-seed I/O in core. Token spellings and owner vectors are shared with `Arc`.
+
+#### Release replay benchmark and profiling
+
+`fd` HEAD `39886c0cb34453cda21163df0c0c76fc9c011a21`, 2,118 reachable commits,
+default exclusions, full walk, quiet JSON output redirected, release build.
+The first token run took 13.417 s versus 2.739 s line mode. Temporary repository-layer
+timers identified token change application as the dominant boundary: 10.052 s over
+4,448 calls; move/bulk reconciliation 0.311 s, labor finalization 0.120 s, parent
+reconciliation 0.056 s, ownership 0.005 s. Profiling code was removed afterward.
+
+Borrowed intern keys, shared spellings/owners, deterministic hash lookup and
+first-byte operator dispatch reduced replay below the 3x line-mode target.
+Allocation/lexer optimizations produced byte-identical fd JSON before subsequent
+provenance-boundary corrections. Keyword checks run only for paired replacements, not unchanged tokens. Three
+release measurements of the identifier-only bulk-corrected build:
+
+| Mode | Run 1 | Run 2 | Run 3 | Median |
+| --- | ---: | ---: | ---: | ---: |
+| Token | 7.832 s | 7.275 s | 7.545 s | 7.545 s |
+| Line | 2.674 s | 2.647 s | 2.699 s | 2.674 s |
+
+Identifier-only eligibility reduces discounted bulk commits on this fd history
+from 22 to 10; total ownership remains 11,322 meaningful lines.
+
+Median ratio: 2.82x. These are local wall-clock observations, not portable timing
+guarantees. The lexer is intentionally heuristic; grammar-aware strings/comments
+and near-total rewrite acceleration remain possible later refinements.
 
 ### Phase 3: scale
 
