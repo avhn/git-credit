@@ -3,6 +3,9 @@
 use super::{Key, OwnedToken, TokenChange, TokenState};
 use std::collections::BTreeMap;
 
+#[path = "fuzzy_moves.rs"]
+mod fuzzy;
+
 /// Adopt a caller-verified exact parent blob, clearing editor work but preserving
 /// first-parent removals as move sources. Call before bulk reconciliation.
 pub fn adopt_token_parent(change: &mut TokenChange, parent: &TokenState) {
@@ -99,8 +102,8 @@ fn push_source(result: &mut Vec<Source>, path: &str, tokens: &mut Vec<OwnedToken
     }
 }
 
-/// Restore cross-file canonical runs spanning at least three meaningful source
-/// lines and three meaningful destination lines. Whitespace and physical blank
+/// Restore exact or fuzzy canonical runs spanning at least three meaningful source
+/// lines and three meaningful destination lines. Fuzzy moves include same-file relocations. Whitespace and physical blank
 /// lines do not participate. Matching starts and ends at meaningful line bounds.
 /// Paths and positions determine ties; sources are consumed once. Other-parent
 /// changes supply removals only, never labor or output state. Repeated calls are
@@ -120,14 +123,19 @@ pub fn reconcile_token_moves(
     }
     let mut order: Vec<_> = (0..changes.len()).collect();
     order.sort_by_key(|&i| changes.get(i).map(|(path, _)| path.clone()));
-    let mut matched = 0;
+    let (mut matched, mut protected) = fuzzy::reconcile(changes, &mut available);
     for index in order {
         if let Some((path, change)) = changes.get_mut(index) {
+            let pending = protected.remove(&index).unwrap_or_default();
+            for position in &pending {
+                change.inserted.remove(position);
+            }
             for source in &mut available {
                 if source.path != *path {
                     matched += match_source(change, source);
                 }
             }
+            change.inserted.extend(pending);
         }
     }
     // Preserve only unconsumed provenance in staged first-parent changes.

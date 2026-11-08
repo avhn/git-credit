@@ -39,7 +39,7 @@ use std::fmt;
 /// Reports embed this number so results computed by different releases are
 /// never silently compared. It changes whenever the same history and policy
 /// could produce different credit.
-pub const ALGORITHM_VERSION: u32 = 3;
+pub const ALGORITHM_VERSION: u32 = 4;
 
 mod engine;
 mod lexer;

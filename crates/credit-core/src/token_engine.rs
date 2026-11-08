@@ -71,6 +71,21 @@ impl TokenState {
         &self.tokens
     }
 
+    /// Restore validated provenance onto an already lexed file state.
+    /// Token identities, boundaries and weights remain unchanged.
+    ///
+    /// # Errors
+    /// Returns `InvalidShares` if the owner count differs from the token count.
+    pub fn restore_owners(&mut self, owners: Vec<LineOwner>) -> Result<(), Error> {
+        if owners.len() != self.tokens.len() {
+            return Err(Error::InvalidShares);
+        }
+        for (token, owner) in self.tokens.iter_mut().zip(owners) {
+            token.owner = Arc::new(owner);
+        }
+        Ok(())
+    }
+
     /// Count physical lines containing at least one positive-weight token.
     pub fn meaningful_lines(&self) -> usize {
         line_ranges(&self.tokens).count()

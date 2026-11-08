@@ -519,3 +519,107 @@ fn token_moves_require_complete_meaningful_source_lines() {
     assert_eq!(reconcile_token_moves(&mut changes, &[]), 0);
     assert_eq!(amount(&changes[1].1.labor().unwrap(), 1), 3_000_000);
 }
+
+#[test]
+fn fuzzy_moves_preserve_only_matching_tokens_and_are_idempotent() {
+    let text = "fn calculate(value) {\n let result = value + 1;\n return result;\n}\n";
+    let original = change(&TokenState::default(), text, 0);
+    let renamed = text.replace("value", "input");
+    let mut changes = vec![
+        ("a.rs".into(), change(original.state(), "", 1)),
+        ("b.rs".into(), change(&TokenState::default(), &renamed, 1)),
+    ];
+    assert!(reconcile_token_moves(&mut changes, &[]) > 0);
+    let moved = &changes[1].1;
+    for token in moved.state().tokens() {
+        let expected = u32::from(token.key().1 == "input");
+        assert_eq!(token.owner().authors(), &[(AuthorId(expected), SCALE)]);
+    }
+    let labor = moved.labor().unwrap();
+    assert!(amount(&labor, 1) > 0 && amount(&labor, 1) < 1_000_000);
+    assert_eq!(reconcile_token_moves(&mut changes, &[]), 0);
+    assert_eq!(changes[1].1.labor().unwrap(), labor);
+}
+
+#[test]
+fn fuzzy_moves_reject_low_similarity_and_choose_lexical_source_ties() {
+    let text = "alpha beta gamma\ndelta epsilon zeta\neta theta iota\n";
+    let original = change(&TokenState::default(), text, 0);
+    let other = change(&TokenState::default(), text, 2);
+    let new = text.replace("gamma", "changed");
+    let make = || {
+        vec![
+            ("z.rs".into(), change(other.state(), "", 1)),
+            ("dest.rs".into(), change(&TokenState::default(), &new, 1)),
+            ("a.rs".into(), change(original.state(), "", 1)),
+        ]
+    };
+    let mut first = make();
+    reconcile_token_moves(&mut first, &[]);
+    assert_eq!(amount(&first[1].1.state().ownership().unwrap(), 2), 0);
+    assert!(amount(&first[1].1.state().ownership().unwrap(), 0) > 0);
+    let expected = first[1].1.state().clone();
+    let mut second = make();
+    second.reverse();
+    reconcile_token_moves(&mut second, &[]);
+    assert_eq!(second[1].1.state(), &expected);
+    let mut low = vec![
+        ("a.rs".into(), change(original.state(), "", 1)),
+        (
+            "b.rs".into(),
+            change(
+                &TokenState::default(),
+                "alpha new names\ndifferent other words\nno common meaning\n",
+                1,
+            ),
+        ),
+    ];
+    assert_eq!(reconcile_token_moves(&mut low, &[]), 0);
+    assert_eq!(amount(&low[1].1.labor().unwrap(), 1), 3_000_000);
+}
+
+#[test]
+fn restored_token_provenance_validates_count_without_partial_update() {
+    let mut state = change(&TokenState::default(), "one two", 0).into_state();
+    let before = state.clone();
+    assert_eq!(state.restore_owners(Vec::new()), Err(Error::InvalidShares));
+    assert_eq!(state, before);
+    state
+        .restore_owners(vec![LineOwner::equal(&[AuthorId(1)]).unwrap(); 2])
+        .unwrap();
+    assert_eq!(amount(&state.ownership().unwrap(), 1), 1_000_000);
+}
+
+#[test]
+fn fuzzy_same_file_moves_keep_provenance_at_a_different_position() {
+    let moved = "fn calculate(value) {\n let result = value + 1;\n return result;\n}\n";
+    let anchor = "anchor one two three four five six seven eight nine ten\nsecond stable block with many unique words stays in place\nthird anchor has enough tokens to choose the stationary region\n";
+    let before = change(&TokenState::default(), &format!("{moved}{anchor}"), 0);
+    let after = format!("{anchor}{}", moved.replace("value", "input"));
+    let mut changes = vec![("same.rs".into(), change(before.state(), &after, 1))];
+    assert!(reconcile_token_moves(&mut changes, &[]) > 0);
+    for token in changes[0].1.state().tokens() {
+        let expected = u32::from(token.key().1 == "input");
+        assert_eq!(token.owner().authors(), &[(AuthorId(expected), SCALE)]);
+    }
+}
+
+#[test]
+fn fuzzy_threshold_is_inclusive_and_unmatched_lines_cannot_be_paired_again() {
+    let text = (0..15).fold(String::new(), |mut text, index| {
+        writeln!(text, "word{index}").unwrap();
+        text
+    });
+    let inserted = "new_a\nnew_b\nnew_c\n";
+    let new = text.lines().take(12).collect::<Vec<_>>().join("\n") + "\n" + inserted;
+    let original = change(&TokenState::default(), &text, 0);
+    let competing = change(&TokenState::default(), inserted, 2);
+    let mut changes = vec![
+        ("a.rs".into(), change(original.state(), "", 1)),
+        ("b.rs".into(), change(competing.state(), "", 1)),
+        ("c.rs".into(), change(&TokenState::default(), &new, 1)),
+    ];
+    assert_eq!(reconcile_token_moves(&mut changes, &[]), 12);
+    assert_eq!(amount(&changes[2].1.labor().unwrap(), 1), 3_000_000);
+    assert_eq!(amount(&changes[2].1.state().ownership().unwrap(), 2), 0);
+}
