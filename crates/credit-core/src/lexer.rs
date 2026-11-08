@@ -16,6 +16,8 @@ pub const PUNCTUATION_WEIGHT: u16 = 250;
 pub enum TokenKind {
     /// Unicode alphanumeric word, allowing underscores and dollar signs.
     Word,
+    /// A comment or hash-directive word, never a bulk-rename candidate.
+    CommentWord,
     /// Number beginning with an ASCII digit, including decimal and exponent forms.
     Number,
     /// Single-, double-, or backtick-quoted text, with backslash escapes.
@@ -38,6 +40,148 @@ pub struct Token<'a> {
     pub line: usize,
     /// Fixed-point lexical weight: 1000, 250, or zero for a trailing comma.
     pub weight: u16,
+}
+
+/// Conservative cross-language keywords and literal names, sorted for binary search.
+/// This is deliberately not a grammar: ambiguous names are excluded from discounts.
+const NON_IDENTIFIERS: &[&str] = &[
+    "FALSE",
+    "False",
+    "NULL",
+    "None",
+    "Self",
+    "String",
+    "TRUE",
+    "True",
+    "abstract",
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "bool",
+    "boolean",
+    "break",
+    "case",
+    "catch",
+    "chan",
+    "char",
+    "class",
+    "const",
+    "consteval",
+    "constexpr",
+    "continue",
+    "def",
+    "default",
+    "defer",
+    "del",
+    "delete",
+    "do",
+    "double",
+    "dyn",
+    "elif",
+    "else",
+    "enum",
+    "except",
+    "export",
+    "extends",
+    "extern",
+    "fallthrough",
+    "false",
+    "final",
+    "finally",
+    "float",
+    "fn",
+    "for",
+    "from",
+    "fun",
+    "func",
+    "function",
+    "global",
+    "go",
+    "if",
+    "impl",
+    "implements",
+    "import",
+    "in",
+    "init",
+    "inout",
+    "instanceof",
+    "int",
+    "interface",
+    "is",
+    "lambda",
+    "let",
+    "long",
+    "map",
+    "match",
+    "module",
+    "move",
+    "mut",
+    "namespace",
+    "new",
+    "nil",
+    "nonlocal",
+    "not",
+    "null",
+    "nullptr",
+    "operator",
+    "or",
+    "override",
+    "package",
+    "pass",
+    "private",
+    "protected",
+    "pub",
+    "public",
+    "raise",
+    "range",
+    "ref",
+    "return",
+    "select",
+    "self",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "str",
+    "string",
+    "struct",
+    "super",
+    "switch",
+    "synchronized",
+    "this",
+    "throw",
+    "throws",
+    "trait",
+    "true",
+    "try",
+    "type",
+    "typedef",
+    "typeof",
+    "undefined",
+    "union",
+    "unsafe",
+    "unsigned",
+    "use",
+    "val",
+    "var",
+    "virtual",
+    "void",
+    "volatile",
+    "while",
+    "with",
+    "yield",
+];
+
+/// Validate only paired code-word spellings, rather than rechecking keywords for
+/// every unchanged token in every file version. Lexical context is checked by
+/// the caller; canonical token equality is independent of this eligibility rule.
+pub(crate) fn identifier_name(text: &str) -> bool {
+    text.chars()
+        .next()
+        .is_some_and(|c| c.is_alphabetic() || matches!(c, '_' | '$'))
+        && NON_IDENTIFIERS.binary_search(&text).is_err()
 }
 
 impl<'a> Token<'a> {
@@ -119,6 +263,7 @@ fn lex_line<'a>(
     tokens: &mut Vec<Token<'a>>,
 ) {
     let mut line_comment = false;
+    let mut hash_directive = false;
     while let Some(first) = rest.chars().next() {
         if first.is_whitespace() {
             rest = &rest[first.len_utf8()..];
@@ -136,12 +281,19 @@ fn lex_line<'a>(
                     .map(|(offset, c)| offset + c.len_utf8())
                     .last()
                     .unwrap_or(first.len_utf8()),
-                TokenKind::Word,
+                if comment || hash_directive {
+                    TokenKind::CommentWord
+                } else {
+                    TokenKind::Word
+                },
             )
         } else {
             (operator_length(rest), TokenKind::Punctuation)
         };
         let (spelling, remaining) = rest.split_at(length);
+        // Exclude hash directives conservatively without changing how the
+        // existing lexer tokenizes strings or numbers after the ## operator.
+        hash_directive |= spelling == "##";
         if !line_comment {
             if *block_comment {
                 if spelling == "*/" {
@@ -210,24 +362,44 @@ fn number_length(text: &str) -> usize {
 
 /// Longest first, including comment delimiters so their words remain independent.
 fn operator_length(text: &str) -> usize {
-    const OPERATORS: &[&str] = &[
-        ">>>=", "<<=", ">>=", "===", "!==", "**=", "&&=", "||=", "??=", "...", "..=", "<=>", ">>>",
-        "->*", "==", "!=", "<=", ">=", "=>", "->", "::", "&&", "||", "+=", "-=", "*=", "/=", "%=",
-        "&=", "|=", "^=", "<<", ">>", "++", "--", "**", "??", "?.", "..", ":=", "//", "/*", "*/",
-        "##", ".*",
-    ];
-    OPERATORS
+    // Most punctuation is a single bracket or separator. Dispatch on the first
+    // byte instead of comparing every operator for every punctuation token.
+    let operators: &[&str] = match text.as_bytes().first() {
+        Some(b'>') => &[">>>=", ">>=", ">>>", ">=", ">>"],
+        Some(b'<') => &["<<=", "<=>", "<=", "<<"],
+        Some(b'=') => &["===", "==", "=>"],
+        Some(b'!') => &["!==", "!="],
+        Some(b'*') => &["**=", "*=", "**", "*/"],
+        Some(b'&') => &["&&=", "&&", "&="],
+        Some(b'|') => &["||=", "||", "|="],
+        Some(b'?') => &["??=", "??", "?."],
+        Some(b'.') => &["...", "..=", "..", ".*"],
+        Some(b'-') => &["->*", "->", "-=", "--"],
+        Some(b':') => &["::", ":="],
+        Some(b'+') => &["+=", "++"],
+        Some(b'/') => &["/=", "//", "/*"],
+        Some(b'%') => &["%="],
+        Some(b'^') => &["^="],
+        Some(b'#') => &["##"],
+        _ => &[],
+    };
+    operators
         .iter()
         .find(|operator| text.starts_with(**operator))
         .map_or_else(
             || text.chars().next().map_or(0, char::len_utf8),
-            |op| op.len(),
+            |operator| operator.len(),
         )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mirror the engine's lexical-context and spelling gates for lexer tests.
+    fn rename_candidate(token: &Token<'_>) -> bool {
+        token.kind == TokenKind::Word && identifier_name(token.text)
+    }
 
     /// Reduce to canonical keys while ignoring trailing-comma spelling differences.
     fn canonical(text: &str) -> Vec<(Option<usize>, String)> {
@@ -307,7 +479,7 @@ mod tests {
             assert_eq!(tokens[0].kind, TokenKind::Punctuation);
             assert_eq!(tokens[2].text, "two");
             assert_eq!(tokens[3].text, "words");
-            assert_eq!(tokens[5].kind, TokenKind::Word);
+            assert_eq!(tokens[5].kind, TokenKind::CommentWord);
             assert_eq!(tokens.last().unwrap().kind, TokenKind::String);
         }
         let tokens = tokenize(
@@ -335,5 +507,32 @@ mod tests {
             []
         );
         assert_eq!(tokenize("", NormalizationMode::IgnoreIndentation), []);
+    }
+
+    /// Binary search must stay correct when the conservative keyword list grows;
+    /// ordinary Unicode, underscore and dollar-prefixed identifiers still qualify.
+    #[test]
+    fn rename_eligibility_excludes_reserved_words_without_changing_keys() {
+        assert!(NON_IDENTIFIERS.windows(2).all(|pair| pair[0] < pair[1]));
+        for word in NON_IDENTIFIERS {
+            let tokens = tokenize(word, NormalizationMode::IgnoreIndentation);
+            assert!(!rename_candidate(&tokens[0]), "{word}");
+            assert_eq!(tokens[0].key(), (None, *word));
+        }
+        let directive = tokenize(
+            "## foo \"two words\" 12",
+            NormalizationMode::IgnoreIndentation,
+        );
+        assert_eq!(
+            directive.iter().map(|token| token.text).collect::<Vec<_>>(),
+            ["##", "foo", "\"two words\"", "12"]
+        );
+        assert!(directive.iter().all(|token| !rename_candidate(token)));
+        for word in ["foo", "bar", "true_value", "récipient", "_value", "$value"] {
+            assert!(
+                rename_candidate(&tokenize(word, NormalizationMode::IgnoreIndentation)[0]),
+                "{word}"
+            );
+        }
     }
 }

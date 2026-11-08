@@ -15,3 +15,10 @@ similar = { version = "2.7", default-features = false, features = ["text"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+imara-diff = { version = "0.2.0", default-features = false }
+
+[[bench]]
+name = "token_diff"
+harness = false

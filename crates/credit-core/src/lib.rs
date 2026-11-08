@@ -5,7 +5,7 @@
 //! accumulates two separate ledgers:
 //!
 //! - **Ownership**: who authored the meaningful content that survives at a
-//!   given commit. Small edits and formatting changes do not transfer it.
+//!   given commit. Unchanged tokens and formatting changes retain provenance.
 //! - **Labor**: meaningful work each author contributed over all history,
 //!   including code that was later rewritten or deleted.
 //!
@@ -13,11 +13,10 @@
 //! every result is a deterministic function of its inputs. Repository access
 //! lives in the `credit-git` crate.
 //!
-//! Ownership and labor use millionths of a nonblank line; blank lines have zero
-//! weight but remain in state for alignment. Similarity is measured
-//! over Unicode scalar values, not tokens or grapheme clusters. The caller must
-//! reconcile same-commit moves before accumulating labor and recompute ownership
-//! from live files after deletions.
+//! Ownership and labor use millionths of a meaningful line. Token mode splits
+//! each line by lexical weights; the optional legacy line engine uses character
+//! similarity. Callers reconcile parent provenance, same-commit moves and bulk
+//! edits before accumulating labor, then recount live ownership after deletions.
 //!
 //! ```
 //! use credit_core::{AuthorId, FileState, Ledger, LineOwner, NormalizationMode,
@@ -40,7 +39,7 @@ use std::fmt;
 /// Reports embed this number so results computed by different releases are
 /// never silently compared. It changes whenever the same history and policy
 /// could produce different credit.
-pub const ALGORITHM_VERSION: u32 = 2;
+pub const ALGORITHM_VERSION: u32 = 3;
 
 mod engine;
 mod lexer;
@@ -57,7 +56,8 @@ pub use model::{
 pub use moves::{reconcile_merge_moves, reconcile_moves};
 pub use parents::{adopt_parent, reconcile_parents};
 pub use token_engine::{
-    OwnedToken, TokenChange, TokenState, apply_token_change, discount_bulk_edits,
+    OwnedToken, TokenChange, TokenState, adopt_token_parent, apply_token_change,
+    discount_bulk_edits, reconcile_token_moves, reconcile_token_parents,
 };
 
 /// Errors produced by the attribution engine.

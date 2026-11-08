@@ -142,6 +142,161 @@ fn bulk_rename_conserves_owners_and_charges_once_per_file() {
     );
 }
 
+/// Repeated semantic edits must keep ordinary editor ownership and labor.
+#[test]
+fn bulk_excludes_boolean_operator_and_keyword_changes() {
+    for (old, new, expected_labor) in [
+        ("return true;", "return false;", 2_222_220),
+        ("left == right;", "left != right;", 500_000),
+        ("if condition", "while condition", 2_500_000),
+        ("foo condition", "return condition", 2_500_000),
+        ("return condition", "foo condition", 2_500_000),
+    ] {
+        let before = change(
+            &TokenState::default(),
+            &format!(
+                "{old}
+"
+            )
+            .repeat(5),
+            0,
+        );
+        let edited = change(
+            before.state(),
+            &format!(
+                "{new}
+"
+            )
+            .repeat(5),
+            1,
+        );
+        let ownership = edited.state().ownership().unwrap();
+        let labor = edited.labor().unwrap();
+        let mut files = vec![edited];
+        assert!(!discount_bulk_edits(&mut files, true), "{old} -> {new}");
+        assert_eq!(files[0].state().ownership().unwrap(), ownership);
+        assert_eq!(files[0].labor().unwrap(), labor);
+        assert_eq!(amount(&labor, 1), expected_labor);
+        assert!(amount(&ownership, 1) > 0);
+    }
+}
+
+/// All literal spellings, comment words and indentation are ineligible, not just
+/// the three motivating semantic edits. Both sides must qualify as identifiers.
+#[test]
+fn bulk_excludes_literals_comments_and_indentation() {
+    for (old, new) in [
+        ("12", "13"),
+        ("١٢", "١٣"),
+        ("\"old\"", "\"new\""),
+        ("'old'", "'new'"),
+        ("`old`", "`new`"),
+        ("True", "False"),
+        ("null", "nil"),
+        ("None", "undefined"),
+        ("// foo", "// bar"),
+        ("# foo", "# bar"),
+        ("## foo", "## bar"),
+        ("-- foo", "-- bar"),
+        ("/* foo */", "/* bar */"),
+        (
+            "/*
+foo
+*/",
+            "/*
+bar
+*/",
+        ),
+    ] {
+        let before = change(
+            &TokenState::default(),
+            &format!(
+                "{old}
+"
+            )
+            .repeat(5),
+            0,
+        );
+        let edited = change(
+            before.state(),
+            &format!(
+                "{new}
+"
+            )
+            .repeat(5),
+            1,
+        );
+        let expected = edited.labor().unwrap();
+        let mut files = vec![edited];
+        assert!(!discount_bulk_edits(&mut files, true), "{old} -> {new}");
+        assert_eq!(files[0].labor().unwrap(), expected);
+        assert!(amount(&expected, 1) > 0);
+    }
+    let before = apply_token_change(
+        &TokenState::default(),
+        &"    foo
+"
+        .repeat(5),
+        &[(AuthorId(0), SCALE)],
+        NormalizationMode::IndentationSignificant,
+    )
+    .unwrap();
+    let edited = apply_token_change(
+        before.state(),
+        &"        foo
+"
+        .repeat(5),
+        &[(AuthorId(1), SCALE)],
+        NormalizationMode::IndentationSignificant,
+    )
+    .unwrap();
+    let mut files = vec![edited];
+    assert!(!discount_bulk_edits(&mut files, true));
+    assert_eq!(amount(&files[0].labor().unwrap(), 1), 2_500_000);
+}
+
+/// Candidate filtering must not narrow the denominator or discount matching
+/// spellings in comments when a mapping qualifies through code occurrences.
+#[test]
+fn bulk_keeps_ineligible_weights_and_occurrences_ordinary() {
+    let old = "foo
+"
+    .repeat(5)
+        + &"return true;
+"
+        .repeat(5);
+    let new = "bar
+"
+    .repeat(5)
+        + &"return false;
+"
+        .repeat(5);
+    let before = change(&TokenState::default(), &old, 0);
+    let mut files = vec![change(before.state(), &new, 1)];
+    assert!(!discount_bulk_edits(&mut files, true));
+    assert_eq!(amount(&files[0].labor().unwrap(), 1), 7_222_220);
+
+    let old = "foo
+"
+    .repeat(5)
+        + &"// foo
+"
+        .repeat(3);
+    let new = "bar
+"
+    .repeat(5)
+        + &"// bar
+"
+        .repeat(3);
+    let before = change(&TokenState::default(), &old, 0);
+    let mut files = vec![change(before.state(), &new, 1)];
+    assert!(discount_bulk_edits(&mut files, true));
+    assert_eq!(amount(&files[0].labor().unwrap(), 1), 3_400_000);
+    assert_eq!(amount(&files[0].state().ownership().unwrap(), 1), 2_400_000);
+    assert!(discount_bulk_edits(&mut files, true));
+    assert_eq!(amount(&files[0].labor().unwrap(), 1), 3_400_000);
+}
+
 #[test]
 fn bulk_requires_count_and_weight_thresholds_and_counts_unpaired_hunks() {
     let before = change(&TokenState::default(), "foo a foo b foo c foo d", 0);
@@ -236,4 +391,131 @@ fn conservation_holds_through_many_deterministic_edits_and_coauthors() {
             state = changed.into_state();
         }
     }
+}
+
+/// Exact adoption keeps first-parent removals available but refunds all insertions.
+#[test]
+fn adopted_token_removals_fund_only_one_copy() {
+    let original = change(
+        &TokenState::default(),
+        "one(value)\ntwo(value)\nthree(value)\nkeep\n",
+        0,
+    );
+    let removed = change(original.state(), "keep\n", 1);
+    let mut adopted = change(original.state(), "keep\n", 2);
+    adopt_token_parent(&mut adopted, removed.state());
+    let mut changes = vec![
+        ("a.rs".into(), adopted),
+        (
+            "b.rs".into(),
+            change(
+                &TokenState::default(),
+                "one( value )\ntwo(value)\nthree(value)\n",
+                2,
+            ),
+        ),
+        (
+            "c.rs".into(),
+            change(
+                &TokenState::default(),
+                "one(value)\ntwo(value)\nthree(value)\n",
+                2,
+            ),
+        ),
+    ];
+    let parents = vec![vec![("a.rs".into(), removed)]];
+    assert_eq!(reconcile_token_moves(&mut changes, &parents), 12);
+    assert_eq!(amount(&changes[1].1.labor().unwrap(), 2), 0);
+    assert_eq!(amount(&changes[2].1.labor().unwrap(), 2), 3_000_000);
+    assert_eq!(reconcile_token_moves(&mut changes, &parents), 0);
+}
+
+/// Parent-only sources obey the same minimum and single-use rules as ordinary moves.
+#[test]
+fn other_token_parent_supplies_move_sources_once() {
+    let original = change(&TokenState::default(), "one\n\ntwo\nthree\n", 0);
+    let removed = change(original.state(), "", 1);
+    let mut changes = vec![
+        (
+            "b.rs".into(),
+            change(&TokenState::default(), "one\ntwo\nthree\n", 2),
+        ),
+        (
+            "c.rs".into(),
+            change(&TokenState::default(), "one\ntwo\nthree\n", 2),
+        ),
+    ];
+    let parents = vec![vec![("a.rs".into(), removed)]];
+    assert_eq!(reconcile_token_moves(&mut changes, &parents), 3);
+    assert_eq!(
+        amount(&changes[0].1.state().ownership().unwrap(), 0),
+        3_000_000
+    );
+    assert_eq!(reconcile_token_moves(&mut changes, &parents), 0);
+    assert_eq!(amount(&changes[1].1.labor().unwrap(), 2), 3_000_000);
+    let short = change(&TokenState::default(), "one\ntwo\n", 0);
+    let mut short_moves = vec![
+        ("a.rs".into(), change(short.state(), "", 1)),
+        (
+            "b.rs".into(),
+            change(&TokenState::default(), "one\ntwo\n", 1),
+        ),
+    ];
+    assert_eq!(reconcile_token_moves(&mut short_moves, &[]), 0);
+}
+
+/// Merge refunds split exact remaining token fractions among coauthors once.
+#[test]
+fn token_parent_precedence_and_coauthor_refunds_are_exact() {
+    let first = change(&TokenState::default(), "inherited", 0);
+    let second = change(&TokenState::default(), "inherited", 1);
+    let mut merge = apply_token_change(
+        &TokenState::default(),
+        "inherited resolution inherited",
+        &[(AuthorId(2), 333_333), (AuthorId(3), 666_667)],
+        NormalizationMode::IgnoreIndentation,
+    )
+    .unwrap();
+    assert_eq!(
+        reconcile_token_parents(&mut merge, [first.state(), second.state()]),
+        2
+    );
+    assert_eq!(reconcile_token_parents(&mut merge, [second.state()]), 0);
+    assert_eq!(amount(&merge.labor().unwrap(), 2), 111_110);
+    assert_eq!(amount(&merge.labor().unwrap(), 3), 222_223);
+    assert_eq!(amount(&merge.state().ownership().unwrap(), 0), 666_666);
+    assert_eq!(amount(&merge.state().ownership().unwrap(), 1), 0);
+    // Existing first-parent tokens never transfer to the other parent's owner.
+    let mut retained = change(first.state(), "inherited resolution", 2);
+    assert_eq!(reconcile_token_parents(&mut retained, [second.state()]), 0);
+}
+
+/// A disjoint-vocabulary fast path must match the ordinary Myers replacement.
+#[test]
+fn disjoint_token_rewrite_is_all_editor_work() {
+    let original = change(&TokenState::default(), "old unique words", 0);
+    let rewritten = change(original.state(), "new distinct text", 1);
+    assert_eq!(
+        amount(&rewritten.state().ownership().unwrap(), 1),
+        1_000_000
+    );
+    assert_eq!(amount(&rewritten.labor().unwrap(), 1), 1_000_000);
+}
+
+/// Partial changed lines cannot inflate a two-line removal into a three-line move.
+#[test]
+fn token_moves_require_complete_meaningful_source_lines() {
+    let original = change(&TokenState::default(), "prefix a\nb\nc\nsuffix\n", 0);
+    let mut changes = vec![
+        (
+            "a.rs".into(),
+            change(original.state(), "prefix\nsuffix\n", 1),
+        ),
+        (
+            "b.rs".into(),
+            change(&TokenState::default(), "a\nb\nc\n", 1),
+        ),
+    ];
+    assert_eq!(reconcile_token_moves(&mut changes, &[]), 0);
+    assert_eq!(amount(&changes[1].1.labor().unwrap(), 1), 3_000_000);
 }
