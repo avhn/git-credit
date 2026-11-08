@@ -1,0 +1,165 @@
+# Purpose: Validate every change to main with policy, secret, static, test and build gates.
+# Triggers: Push to main and manual invocation.
+# Production effect: None.
+# Gates: Repository policy, secret scan, static checks, unit tests and build; no release job yet.
+# External dependencies: GitHub-hosted ubuntu-latest, windows-latest and macos-latest runners; crates.io; GitHub releases of gitleaks.
+# Failure owner: avhn, GitHub Actions run status and logs.
+# Budgets: initial estimates set 2026-11-08 before any measured run; remeasure and apply 2x headroom.
+name: CI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+jobs:
+  policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check banned dashes
+        run: tools/check-text.sh
+      - name: Check commit messages
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          range="HEAD"
+          if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..HEAD"
+          fi
+          tools/check-commit-msg.sh --range "$range"
+      - name: Verify dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check bans licenses sources
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "${base}/${archive}"
+          curl -fsSLO "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${archive}$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "${archive}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+      - name: Scan for secrets
+        run: gitleaks git --redact --no-banner --exit-code 1 .
+  static:
+    name: Static checks
+    needs: [policy, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-11-08
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Restore dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Lint source
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings -W clippy::pedantic -A clippy::module_name_repetitions -A clippy::must_use_candidate
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+  unit:
+    name: Unit tests and coverage
+    needs: [policy, secrets]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-11-08
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - name: Restore dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Run tooling tests
+        if: runner.os == 'Linux'
+        run: tools/tests/check-commit-msg.test.sh
+      - name: Install cargo-llvm-cov
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-llvm-cov
+      - name: Run unit tests with coverage
+        if: runner.os == 'Linux'
+        run: |
+          cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+          cargo llvm-cov report --package credit-core --fail-under-lines 80
+      - name: Run unit tests
+        if: runner.os != 'Linux'
+        run: cargo test --workspace --locked
+  build:
+    name: Build
+    needs: [policy, secrets]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+          - os: windows-latest
+            toolchain: stable
+          - os: macos-latest
+            toolchain: stable
+          - os: ubuntu-latest
+            toolchain: "1.99"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-11-08
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: Restore dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.toolchain }}
+      - name: Build packages
+        run: cargo build --workspace --all-targets --locked
