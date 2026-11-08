@@ -8,9 +8,10 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: early development.** The pure line-attribution engine, repository
-> scaffold and CI are in place. Repository replay and the `analyze` command are
-> not implemented yet (see [Roadmap](#roadmap)). Nothing here is released yet.
+> **Status: line-level analysis available.** `analyze` reads committed HEAD and
+> reports ownership and labor using a first-parent walk. Merge attribution is
+> approximate; token-level and full-graph analysis are planned. Nothing here is
+> released yet. These metrics describe provenance, not a person's value.
 
 ## Why
 
@@ -40,21 +41,59 @@ Attribution rules:
 - **Noise is excluded:** lockfiles, generated and vendored code, binaries and
   configurable paths.
 
-## Planned usage
+## Usage
 
 ```console
-$ git-credit analyze
-AUTHOR          OWNERSHIP   LABOR
-Alice           54.2%       12,840
-Bob             31.0%        9,115
-Carol           14.8%        6,402
-
-$ git-credit analyze --json > credit.json
-$ git-credit badge --style bar --out credit.svg
+$ cargo run --locked -- analyze .
+$ cargo run --locked -- analyze ../another-repository --json > credit.json
+$ cargo run --locked -- analyze . --keep 0.80 --exclude 'generated/**' --depth 2
+$ cargo install --path crates/git-credit --locked
+$ git-credit analyze --quiet --no-color
 ```
 
-A reusable GitHub Action will run on every push to `main` and publish badges to a
-`badges` branch for your README.
+The table shows `AUTHOR`, `OWNERSHIP %`, `OWNED LINES` and `LABOR`, sorted by
+ownership descending. The footer identifies HEAD, commit count, walk mode and
+algorithm version. JSON adds per-directory ownership and the effective policy;
+see [the versioned contract](docs/json.md). Output is plain text, including when
+piped. `--quiet` suppresses warnings on stderr, while `-v` enables diagnostics.
+`NO_COLOR` and `--no-color` are respected because no color is emitted.
+
+Only committed content is scored. Blank lines have zero weight. Shallow clones
+fail with a `git fetch --unshallow` hint; analysis never fetches or runs hooks.
+Bare repositories are supported. Symlinks, submodules, binaries and files over
+1 MiB are skipped; the file-size limit is configurable. This build supports
+SHA-1 repositories. New branch content introduced by merges is credited to the
+merge author and co-authors unless existing first-parent provenance matches it.
+
+### Configuration
+
+Optional `.git-credit.toml` at the repository root:
+
+```toml
+keep = 0.70
+group_by = "name" # Use "email" to keep different addresses separate.
+exclude = ["generated/**", "fixtures/**"]
+opt_out = ["private@example.test"]
+max_file_size = 1048576
+```
+
+Explicit `--keep` overrides config. Repeated `--exclude` flags replace config
+exclusions; built-in lockfile, vendor, node_modules, dist, minified and source-map
+exclusions remain active. Thresholds are rounded to per-mille precision.
+`--depth` defaults to 1; zero disables directory reporting. Names are grouped by
+case-insensitive trimmed display name after mailmap resolution by default. The
+most frequently used email represents each group, and JSON lists all merged
+canonical addresses in `emails`. Use `--by-email` (overrides config) or
+`group_by = "email"` when distinct people share a name. Matching any merged address
+in `opt_out` anonymizes the entire group, including its earlier work, without
+changing percentages or exposing its other addresses.
+The committed HEAD `.mailmap` applies to all history, with configured
+`mailmap.blob` and `mailmap.file` overrides. Worktree `.mailmap` edits are ignored.
+Rename detection uses an isolated raw-object cache: staged/dirty attributes and
+configured diff drivers or text conversion do not affect attribution.
+
+Exit codes are 0 for success, 1 for analysis/configuration errors and 2 for invalid
+CLI usage. Badges and a reusable GitHub Action remain planned.
 
 ## Prerequisites
 
@@ -77,6 +116,8 @@ $ cargo run -- --help
 | Command                                        | What it does                                        |
 | ---------------------------------------------- | --------------------------------------------------- |
 | `cargo build --workspace`                      | Build every crate                                   |
+| `make analyze REPO=.`                          | Analyze committed HEAD as a table                   |
+| `make json REPO=.`                             | Analyze committed HEAD as JSON                      |
 | `cargo test --workspace`                       | Run all tests                                       |
 | `cargo lint`                                   | Clippy with the same flags as CI (pedantic, deny)   |
 | `cargo fmt --all`                              | Format the code                                     |
@@ -99,7 +140,7 @@ tools/           repository policy scripts and their tests
 | Phase | Scope                                                                                     | State       |
 | ----- | ----------------------------------------------------------------------------------------- | ----------- |
 | 0     | Workspace, CI on Linux, Windows and macOS, policy checks, licensing                       | Done        |
-| 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | In progress |
+| 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
 | 2     | Token-level attribution with tree-sitter, merge-aware history, bulk-edit detection        | Planned     |
 | 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Planned     |
 | 4     | SVG badges and cards, shields.io endpoint, reusable GitHub Action                         | Planned     |

@@ -67,9 +67,13 @@ documented as approximate. Phase 2 replaces it with merge-aware replay over the
 full commit graph.
 
 Only the current state is kept in memory: one attribution vector per live file.
-Labor accumulates once per visited commit into a per-author total. Nothing is
-stored per commit, so memory is bounded by the size of the tree at any one time,
-not by history length.
+Labor accumulates once per visited commit into a per-author total. No historical
+file attribution is retained. The implementation stores the first-parent commit
+IDs to reverse the walk, so memory is live-tree state plus one commit's diff and
+O(commit count) object IDs, rather than historical file contents. Side branches
+are not replayed: existing first-parent provenance can survive a merge, but new
+branch content falls back to the merge author and co-authors. Reports warn when
+merges occur; recovering branch authors requires Phase 2's graph replay.
 
 ### Normalization (Phase 1)
 
@@ -79,8 +83,18 @@ ignored. Leading indentation is also ignored for files whose language does not
 give indentation meaning; for indentation-sensitive files (Python, YAML, Makefile,
 and unknown extensions) indentation is kept, because there it can be a real change.
 Interior whitespace, string contents and comments are compared as written.
-A commit whose every change is equal under this normalization is a **formatting
-commit**: it earns no labor and transfers no ownership.
+Blank lines (empty after normalization, including whitespace-only lines) have
+zero ownership weight and earn zero labor. They remain in file state for physical
+alignment and move matching. All line diffs operate on the normalized nonblank
+sequence, then map attribution and insertion candidates back to physical positions.
+This applies to mixed meaningful/blank edits as well as formatting-only changes:
+blank runs cannot become diff anchors that transfer unchanged meaningful content.
+Adding, removing or relocating only blank lines is formatting. This corrects the
+initial unreleased core's physical-line counting and alignment during Phase 1 review.
+A commit whose included nonblank content is unchanged under normalization is a
+**formatting commit**: it earns no labor and transfers no ownership. Renames and
+moves remain meaningful structural changes. Commits containing only excluded
+changes also count as formatting for the selected policy.
 
 ### Small edits keep the original author (Phase 1)
 
@@ -97,10 +111,17 @@ with similarity `s` (0 to 1):
 Unpaired new lines are owned by the editor with labor 1. Deleted lines remove
 ownership but never remove past labor. `keep` is configurable in `.git-credit.toml`.
 
-The core implementation uses deterministic Myers diffs at both line and Unicode
-scalar-value character levels. Character similarity is twice the equal character
-count divided by the combined character count. Threshold comparisons use exact
-integer ratios. New lines are visited in order and each old line can be paired
+The core implementation uses deterministic Myers diffs over nonblank normalized
+lines. Character similarity is twice the Unicode scalar longest-common-subsequence
+(LCS) length divided by the combined character count. Short lines use Myers to
+obtain that count. For pairs with at least 256 scalars on each side and at most
+128 distinct old scalars, an exact bit-parallel LCS computes the same count with
+O(new length * ceil(old length / 64)) word operations. Mask storage is bounded by
+the old alphabet and line length. This avoids the quadratic edit-distance cost of
+large single-line SVGs without approximating scores or changing tie-breaking.
+Differential tests check word boundaries, Unicode and agreement with Myers.
+Cached character frequencies and length bounds skip only pairs that provably
+cannot beat the current best score. Threshold comparisons use exact integer ratios. New lines are visited in order and each old line can be paired
 only once. If a replacement hunk has more than 250,000 old/new candidate pairs,
 pairing is skipped, the hunk is treated as a rewrite, and the core returns a
 `pairing_capped` warning flag for the report layer.
@@ -109,8 +130,10 @@ Ownership and labor both use millionths of a line. Equal co-author ownership
 splits allocate remainder units to the earliest authors in caller order.
 Fractional labor rounds upward to the nearest millionth; cumulative integer
 apportionment splits that amount among commit authors without losing units.
-Blank physical lines count as lines; a terminal newline does not add a line.
-The presence or absence of the terminal newline alone is formatting.
+Blank physical lines have zero weight; a terminal newline does not add a line.
+The presence or absence of the terminal newline alone is formatting. CLI and
+configuration thresholds are rounded to the nearest per-mille value; reports
+include the effective threshold, not the unquantized input.
 
 Phase 2 refines this to tokens: unchanged tokens keep their provenance, inserted
 and replaced tokens belong to the editor. The review of the original plan rejected
@@ -126,14 +149,49 @@ consecutive lines, orders paths lexicographically and positions ascending, and
 consumes each removed source line at most once. Copies therefore cannot multiply
 ownership. Only removed lines not retained by within-file pairing and inserted or
 rewritten destination lines participate. Reconcile all changes from one commit
-before accumulating labor. Fuzzy cross-commit move detection is Phase 3.
+before accumulating labor. Exact normalized three-line prefixes index move
+candidates while preserving source-position order; blocks shorter than three are
+rejected without scanning destinations. Fuzzy cross-commit move detection is Phase 3.
+
+One isolated raw-object diff cache is built per analysis and reused across commits.
+Its attribute stack has an empty ID mapping and no global or info attributes;
+its pipeline has no worktree roots, drivers or text conversion. Staged and dirty
+`.gitattributes`, configured diff drivers and attribute files cannot change a
+report for the same committed history and policy. Transient blob resources are
+cleared after each commit's tree diff, and the file-size cap also bounds rename
+similarity resources.
 
 ### Identities
 
 Authors are resolved through the `.mailmap` at `HEAD` consistently across all
 history. `Co-authored-by` trailers split a commit's labor equally among the
 author and co-authors after mailmap resolution; ownership of lines from that commit
-is split the same way.
+is split the same way. Default identity groups use trimmed, lowercased display
+names after mailmap resolution. Empty names fall back to canonical email keys.
+`--by-email` or `group_by = "email"` instead groups by canonical email; the flag
+overrides configuration. Canonical email matching is case-insensitive. Name
+grouping is a heuristic: distinct people sharing a display name merge by default,
+so users should select email grouping when names are ambiguous.
+
+The terminal trailer paragraph is parsed case-insensitively. Participants are
+deduplicated by group before equal splitting, with remainder units allocated in
+sorted group-key order. Each canonical email is counted at most once per group
+per analyzed commit (including formatting commits and co-author participation).
+The most frequent address becomes the representative email, with lexical order
+breaking ties. Display spelling comes from the group's first resolved name.
+JSON lists all canonical merged addresses in a sorted `emails` array.
+
+Opt-out matching against any merged canonical address anonymizes the entire group
+retroactively. After replay, opted-out groups are combined into one anonymous
+identity and all ownership, labor and directory IDs are remapped. The anonymous
+row has an empty representative email and an empty `emails` array. Grouping and
+privacy aggregation preserve total credit; zero-credit groups are not rendered.
+These review corrections retain algorithm version 1 because it is unpublished.
+
+The committed HEAD map is used even with a dirty worktree. Configured
+`mailmap.blob` and trusted `mailmap.file` override it in that order; the latter
+uses gix path expansion and is limited to 1 MiB. Malformed mailmap entries and
+malformed co-author trailers are ignored, following Git's permissive convention.
 
 ### Exclusions
 
@@ -141,6 +199,21 @@ Applied before scoring: binary files, lockfiles (`Cargo.lock`, `package-lock.jso
 `pnpm-lock.yaml`, `yarn.lock`, `poetry.lock` and similar), common generated and
 vendored paths, and globs from `.git-credit.toml`. Opted-out identities are reported
 as one anonymous aggregate so percentages keep the same denominator.
+
+Blobs containing NUL in their first 8000 bytes and blobs larger than the effective
+size cap (default 1 MiB) are skipped with deduplicated warnings. Remaining text is
+decoded as UTF-8 lossily, with a warning for invalid bytes. Symlinks and submodules
+are not scored. Non-UTF-8 repository paths fail rather than being conflated by
+lossy decoding. Filename indentation rules are conservative and case-sensitive;
+unrecognized extensions preserve indentation.
+
+The gix build enables only `sha1`, `revision`, `mailmap` and `blob-diff`, with no
+default features or network transport backend. It reads raw tree blobs for rename
+tracking, not worktree filters or external text conversion. SHA-256 repositories
+are not supported by this Phase 1 build. `cargo tree -d` retains gix's transitive
+hashbrown versions and the proc-macro syn major versions; there is no duplicate
+native Git or TLS implementation. TOML uses its current parser to avoid a second
+winnow major version.
 
 ### Complete history
 
@@ -154,7 +227,9 @@ doing any work and fails with the command that fixes it
 `--json` output carries a schema version, `ALGORITHM_VERSION`, the analyzed `HEAD`,
 the walk mode (`first-parent`), the policy settings, units (`lines` in Phase 1),
 warnings, per-author ownership and labor, and per-directory breakdowns. The shape is
-documented in `docs/json.md` when Phase 1 lands.
+documented in [json.md](json.md). Per-author and directory shares are fractions
+in 0..=1; table output converts them to percentages. Directory depth defaults to
+one, with root-level files under `.`. Depth zero disables the breakdown.
 
 ## Phases
 
@@ -165,7 +240,7 @@ text policy scripts with tests, CI on GitHub-hosted runners (policy, secret scan
 static checks, unit tests with coverage on Linux, Windows and macOS, builds
 including the MSRV), weekly advisory audit, Dependabot.
 
-### Phase 1: line-level MVP
+### Phase 1: line-level MVP (done)
 
 `git-credit analyze [PATH]` with table and `--json` output, first-parent walk,
 normalization and formatting-commit detection, similarity threshold, renames and
