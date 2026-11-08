@@ -8,7 +8,7 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: Phase 2 complete.** `analyze` defaults to token-level attribution and
+> **Status: Phase 3 complete.** `analyze` defaults to token-level attribution and
 > merge-aware full-history replay. Reports stay in line-equivalent units. Use
 > `--granularity line` for the legacy line rules. These metrics describe provenance,
 > not a person's value.
@@ -76,6 +76,20 @@ mode) from merge parents; unmatched content is merge-resolution work. The lexer
 is language-agnostic, not a syntax parser; quoted strings stop at physical line
 ends and tabs use eight-column indentation stops.
 
+### Incremental replay
+
+Analysis caches replay state inside `.git/git-credit/cache/`, never the worktree.
+Subsequent runs score only new commits when the required parent snapshots survive.
+Cold and cached JSON are byte-identical. Use `--no-cache` to disable both reads and
+writes, `--cache-dir DIR` to override the location, or `--cache-depth N` to retain
+N first-parent ancestors in addition to HEAD (default 64). These flags also work
+with `badge`. `-v` explains cache hits, rebuilds and the 256 MiB size bound.
+
+Policy changes, history rewrites and merges forked beyond the retained depth cause
+safe cold fallback. Identity changes that alter co-author splitting also rebuild;
+current display identities and opt-out always apply. The cache contains historical
+provenance and must not be published as badge output. See [performance measurements](docs/PERFORMANCE.md).
+
 ### Configuration
 
 Optional `.git-credit.toml` at the repository root:
@@ -84,6 +98,7 @@ Optional `.git-credit.toml` at the repository root:
 walk = "full" # Use "first-parent" for legacy merge attribution.
 granularity = "token" # Use "line" for Phase 2a attribution.
 bulk_discount = true
+cache = true # Disable with false or --no-cache.
 keep = 0.70 # Used only with line granularity.
 group_by = "name" # Use "email" to keep different addresses separate.
 exclude = ["generated/**", "fixtures/**"]
@@ -178,7 +193,7 @@ tools/           repository policy scripts and their tests
 | 0     | Workspace, CI on Linux, Windows and macOS, policy checks, licensing                       | Done        |
 | 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
 | 2     | Language-agnostic token attribution, merge-aware history, bulk-edit detection             | Done |
-| 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Planned     |
+| 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Done     |
 | 4     | SVG badges and cards, shields.io endpoints, reusable GitHub Action and tagged binaries   | Implemented; hosted release/publication pending |
 
 Details and design decisions: [docs/PLAN.md](docs/PLAN.md).

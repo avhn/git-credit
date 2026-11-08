@@ -181,7 +181,7 @@ ownership. Only removed lines not retained by within-file pairing and inserted o
 rewritten destination lines participate. Reconcile all changes from one commit
 before accumulating labor. Exact normalized three-line prefixes index move
 candidates while preserving source-position order; blocks shorter than three are
-rejected without scanning destinations. Fuzzy cross-commit move detection is Phase 3.
+rejected without scanning destinations. Phase 3 adds bounded fuzzy same-commit token moves; cross-commit search is not implemented.
 
 One isolated raw-object diff cache is built per analysis and reused across commits.
 Its attribute stack has an empty ID mapping and no global or info attributes;
@@ -423,11 +423,104 @@ Median ratio: 2.82x. These are local wall-clock observations, not portable timin
 guarantees. The lexer is intentionally heuristic; grammar-aware strings/comments
 and near-total rewrite acceleration remain possible later refinements.
 
-### Phase 3: scale
+### Phase 3: scale (done)
 
-Incremental cache keyed by algorithm version, policy digest and processed `HEAD`;
-cold and incremental runs must produce identical output. Fuzzy move detection.
-Benchmarks on large public repositories.
+Algorithm version 4 adds incremental replay and fuzzy same-commit token moves.
+Schema version remains 1; line-mode credit rules are unchanged. Release timings
+and reproduction details are in [PERFORMANCE.md](PERFORMANCE.md).
+
+```mermaid
+flowchart LR
+    subgraph Before[Cold replay]
+        H[Complete history] --> R[Score every commit] --> J[Report]
+    end
+    subgraph After[Incremental replay]
+        G[History and identity metadata] --> V[Validate cached ancestry and policy]
+        V --> C[Cached snapshots and commit work]
+        V --> N[Score only unprocessed commits]
+        C --> A[Ordered accounting and current privacy policy]
+        N --> A
+        A --> O[Byte-identical report]
+    end
+```
+
+#### Cache representation and trust boundary
+
+The CLI enables `<git-dir>/git-credit/cache/replay.pack` by default, including for
+bare repositories. `--cache-dir` overrides the directory, `--no-cache` disables
+both reads and writes, and config `cache = false` disables it. Both `analyze` and
+`badge` accept these controls. Library callers opt in with `CacheOptions`, including
+a complete exclusion-policy fingerprint because an opaque callback cannot be hashed.
+
+A generation contains a processed commit set with per-commit labor, formatting,
+bulk and warning data; HEAD plus up to `--cache-depth` first-parent ancestors
+(default 64); and a SHA-256-addressed map of serialized file provenance. Shared
+unchanged files are encoded once across snapshots. Only referenced states enter
+the next generation. The entire pack is capped at 256 MiB, checksum-verified before
+decoding, and replaced using a same-directory temporary file, flush and atomic
+persist. Oversized generations or write failures leave the prior cache intact.
+Verbose stderr reports fallback reasons, new commits replayed, snapshots and bytes;
+cache diagnostics never enter JSON warnings.
+
+The format-version/algorithm-version/policy SHA-256 includes granularity, walk,
+keep, bulk discount, max file size and complete exclusions. Committed blob content
+is read and re-lexed during load, then validated owner shares are restored; cached
+input cannot supply token weights, boundaries or normalization. Missing blobs,
+invalid shares or author references, malformed encodings and checksums cause cold
+fallback. A checksum detects accidental corruption, not malicious replacement by
+an actor who already has write access to the cache directory.
+
+Identity resolution cannot be moved after scoring without changing existing
+semantics: mailmap/grouping deduplicates co-authors before splitting millionths,
+and identity order affects rounding. Instead, every invocation rebuilds identity
+participation in the current deterministic walk and validates the cached ordered
+per-commit identity/share SHA-256 key. Cached numeric IDs are remapped by
+stable group keys, so newly interleaved branches do not invalidate unchanged
+identities. A change that alters scored identities invalidates the generation.
+Display-only changes and opt-out are applied freshly without invalidation. The
+cache key therefore has separate policy and identity digests. Raw identity
+resolution is not deferred. Full-history metadata traversal remains; only tree
+comparison and attribution replay become incremental.
+
+Resume requires cached HEAD to be reachable, the processed set to equal its
+ancestry, and every processed parent of a new commit to have a snapshot. A merge
+forked outside retained depth, a rewrite or an identity/policy mismatch falls back
+to cold replay. Per-commit results are folded in the current cold topological order,
+including bulk-warning examples, so newly interleaved branches cannot change JSON
+ordering. Cached per-author labor totals must be representable before resumption.
+Any core error after a successful resume retries once with fresh cold state and
+cache reads disabled. Cache publication follows successful report accounting,
+including privacy aggregation, so failed attempts never publish a generation.
+Fixtures compare actual JSON bytes in token and line modes, including overflowing
+labor records with otherwise valid encodings and checksums.
+
+Serialization is confined to `credit-git`. `postcard` 1.1.3 (MIT OR Apache-2.0,
+maintained by the postcard project) provides compact varint encoding without a
+custom parser; `serde` derives only repository-layer transport types. `sha2`
+0.11.1 (MIT OR Apache-2.0, RustCrypto) provides stable content and integrity hashes;
+std has no cryptographic digest. `tempfile` (MIT OR Apache-2.0) provides unique
+same-directory temporary files and atomic replacement on Windows as well as Unix.
+No I/O or serialization dependency was added to core.
+
+#### Fuzzy same-commit moves
+
+After parent reconciliation and before exact-move fallback/bulk accounting,
+complete removed and inserted runs spanning at least three meaningful lines are
+paired by token-diff similarity: twice matched lexical weight divided by total
+weight, with an inclusive 0.8 threshold. Matching canonical tokens keep original
+owners and earn no labor; unmatched inserted tokens retain editor ownership and
+ordinary fractional labor. Same-file relocations participate too. Source blocks
+are consumed once, including unmatched removed tokens, so copies cannot multiply
+credit. Exact rational comparison orders best similarity first, then source path
+and position, destination path and position. Reconciliation is idempotent.
+
+The search indexes removed blocks by distinct canonical keys. Each destination
+uses its four rarest shared keys to select at most 32 sources in deterministic
+order. Fuzzy blocks are limited to 4096 tokens each; larger runs retain exact-move
+fallback. Thus there are at most 32 bounded token diffs per destination, rather
+than a quadratic block-pair scan. This conservative bound may miss large moves or
+matches hidden behind more than 32 competing sources. Line mode is unchanged.
+
 
 ### Phase 4: badges and the GitHub Action
 

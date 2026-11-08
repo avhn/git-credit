@@ -27,6 +27,9 @@ fail with a `git fetch --unshallow` hint; no fetching occurs during analysis.
 | `--theme` | `light` | `light` or `dark`, applied to the summary card |
 | `--width PX` | `600` | Bar and card width, from 200 to 4096 pixels |
 | `--from REPORT_JSON` | None | Import a privacy-filtered [schema 1 report](json.md), without opening a repository |
+| `--cache-dir DIR` | Inside Git directory | Override replay cache location |
+| `--cache-depth N` | `64` | Retain N first-parent ancestors plus HEAD |
+| `--no-cache` | Off | Disable replay cache reads and writes |
 | `-v` | Off | List written paths and analysis warnings on stderr |
 
 Successful runs leave stdout empty. Invalid flags exit 2; report, analysis and
@@ -123,6 +126,7 @@ jobs:
 
 | Input | Default | Meaning |
 | --- | --- | --- |
+| `cache` | `true` | Restore/save incremental replay state with actions/cache; false passes --no-cache |
 | `version` | `latest` | Download the latest release or a tag such as `v0.1.0` |
 | `binary` | Empty | Use an existing executable path, skipping download/checksum verification |
 | `out-dir` | `.git-credit` | Generated directory, relative to the checkout unless absolute |
@@ -131,6 +135,12 @@ jobs:
 | `publish-branch` | `badges` | Branch to replace; empty skips publication |
 | `token` | `${{ github.token }}` | Token with `contents: write` when publishing |
 | `source-branch` | Empty | Skip publication unless its current remote HEAD still equals the triggering SHA |
+
+Cache keys include repository, runner OS, algorithm version and triggering SHA,
+with a same-repository/OS/algorithm restore prefix. The CLI validates restored
+policy, identities and ancestry before use. Cache files contain historical
+provenance, not privacy-filtered assets; GitHub cache access and retention rules
+apply. Disable the cache input if that retention is inappropriate.
 
 The caller must check out with `fetch-depth: 0`. The action fails clearly on a
 shallow checkout, rather than reporting inflated root-author credit. It does not

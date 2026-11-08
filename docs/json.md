@@ -14,14 +14,14 @@ JSON and exit 1; invalid command-line usage exits 2.
 
 ## Version 1
 
-Algorithm version 3 defaults to token attribution; `granularity = "line"` keeps
+Algorithm version 4 defaults to token attribution; `granularity = "line"` keeps
 Phase 2a numbers. The schema version stays 1: new fields are additive and units
 remain `lines`. Consumers comparing reports must check algorithm and granularity.
 
 ```json
 {
   "schema_version": 1,
-  "algorithm_version": 3,
+  "algorithm_version": 4,
   "head": "0123456789012345678901234567890123456789",
   "walk": "full",
   "units": "lines",
@@ -65,7 +65,7 @@ built-in and custom glob, sorted and deduplicated.
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | Output structure version, currently 1 |
-| `algorithm_version` | Attribution semantics version, currently 3 |
+| `algorithm_version` | Attribution semantics version, currently 4 |
 | `head` | Full analyzed committed HEAD SHA-1 object ID |
 | `walk` | `full` by default; `first-parent` selects the legacy chain |
 | `units` | Always `lines`; one ownership unit per meaningful physical output line |
@@ -125,7 +125,7 @@ matching and the original small-edit rule. Only unmatched content is new merge w
 
 `--first-parent` or `walk = "first-parent"` in `.git-credit.toml` selects legacy
 attribution: new branch content in merge diffs goes to merge authors and trailers,
-with an approximation warning. `walk = "full"` is the default. Algorithm version 3
+with an approximation warning. `walk = "full"` is the default. Algorithm version 4
 applies to both walks and granularities; schema version remains 1. Identity display spelling follows
 the first resolved occurrence in the deterministic selected walk. Verbose stderr
 also reports peak retained commit states; that diagnostic is not a JSON field.
@@ -162,3 +162,15 @@ labor. `bulk_edit_commits` counts affected commits once. One warning lists up to
 full example commit IDs in deterministic replay order. `--quiet` suppresses stderr,
 not this warning in JSON. `--no-bulk-discount` or `bulk_discount = false` disables
 both the preservation and fixed-charge rule, restoring ordinary token attribution.
+
+## Incremental replay and fuzzy moves
+
+Algorithm 4 recognizes bounded same-commit fuzzy token moves at similarity 0.8
+or higher over at least three complete meaningful lines. Only matched tokens
+inherit provenance; unmatched inserted tokens earn ordinary labor. The search
+limits are documented in [PLAN.md](PLAN.md#fuzzy-same-commit-moves).
+
+Caching does not add fields or alter report bytes. `commits_analyzed` remains the
+complete selected-history count, not just cache misses. Cache diagnostics and size
+appear only on verbose stderr. Identity changes that affect co-author splitting
+or rounding cause cold fallback; current mailmap display and opt-out always apply.

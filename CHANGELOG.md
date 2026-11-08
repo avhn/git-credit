@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Algorithm version 4 adds bounded fuzzy same-commit token moves, preserving matched
+  token ownership and charging only unmatched editor tokens. Line rules are unchanged.
+
 - Algorithm version 3 defaults to canonical token attribution with exactly conserved
   line-equivalent ownership and fractional insertion labor. Line granularity keeps
   Phase 2a credit numbers unchanged; `--keep` is restricted to line mode.
@@ -24,6 +27,14 @@ All notable changes to this project are documented here. The format follows
   emits the approximate-merge warning.
 
 ### Added
+
+- Default incremental replay cache inside the Git directory, content-addressed file
+  states, recent first-parent snapshots, atomic checksummed generations, safe cold
+  fallback, and byte-equivalence fixtures for merges, rewrites and invalid caches.
+- `--cache-dir`, `--cache-depth`, `--no-cache`, config `cache = false`, and a pinned
+  GitHub Action cache input used by the badge workflow.
+- Release cold and incremental benchmarks on fd, ripgrep and tokio in
+  `docs/PERFORMANCE.md`.
 
 - Language-agnostic token lexer, `--granularity line|token` and matching config,
   commit-wide bulk-rename detection, `--no-bulk-discount` / `bulk_discount = false`,
