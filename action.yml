@@ -1,0 +1,71 @@
+# Purpose: Render git-credit assets and optionally publish a generated-only branch.
+# Triggers: Explicit composite-action invocation by a caller with a full checkout.
+# Production effect: Replace the configured badge branch using a checked lease.
+# Gates: Full history, release checksum, successful rendering and optional source freshness.
+# External dependencies: GitHub releases, Git, Bash, Python 3, curl and a caller token.
+# Failure owner: avhn, caller workflow run status and logs.
+name: git-credit
+description: Render fair per-author ownership and labor badges from committed history
+inputs:
+  version:
+    description: Release tag to download, or latest
+    default: latest
+  binary:
+    description: Optional existing binary path; skip release download and checksum verification
+    default: ''
+  out-dir:
+    description: Generated asset directory relative to the checkout
+    default: .git-credit
+  styles:
+    description: SVG selection (bar, card, bus-factor, authors or all)
+    default: all
+  top:
+    description: Maximum named contributors (1 through 1000)
+    default: '5'
+  publish-branch:
+    description: Generated-only branch to replace; empty disables publication
+    default: badges
+  token:
+    description: Token with contents write permission when publishing
+    default: ${{ github.token }}
+  source-branch:
+    description: Optional branch whose current remote HEAD must still equal the triggering SHA before publication
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Verify complete history
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+          echo 'git-credit requires complete history; set actions/checkout fetch-depth: 0 or run git fetch --unshallow.' >&2
+          exit 1
+        fi
+    - name: Prepare git-credit binary
+      id: binary
+      shell: bash
+      env:
+        GC_VERSION: ${{ inputs.version }}
+        GC_BINARY: ${{ inputs.binary }}
+      run: bash "$GITHUB_ACTION_PATH/tools/action-download.sh"
+    - name: Render contribution badges
+      shell: bash
+      env:
+        GC_BINARY: ${{ steps.binary.outputs.binary }}
+        GC_OUT_DIR: ${{ inputs.out-dir }}
+        GC_STYLE: ${{ inputs.styles }}
+        GC_TOP: ${{ inputs.top }}
+      run: |
+        set -euo pipefail
+        "$GC_BINARY" badge . --out-dir "$GC_OUT_DIR" --style "$GC_STYLE" --top "$GC_TOP"
+    - name: Publish generated assets
+      if: inputs.publish-branch != ''
+      shell: bash
+      env:
+        GC_OUT_DIR: ${{ inputs.out-dir }}
+        GC_PUBLISH_BRANCH: ${{ inputs.publish-branch }}
+        GC_SOURCE_BRANCH: ${{ inputs.source-branch }}
+        GC_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        GC_TOKEN: ${{ inputs.token }}
+      run: bash "$GITHUB_ACTION_PATH/tools/action-publish.sh"

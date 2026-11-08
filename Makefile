@@ -1,7 +1,9 @@
 # Local quality gates and offline analysis entry points.
 REPO ?= .
 
-.PHONY: fmt lint test check analyze json
+OUT_DIR ?= .git-credit
+
+.PHONY: fmt lint test check analyze json badge
 
 # Format every workspace crate using the standard Rust formatter.
 fmt:
@@ -29,3 +31,7 @@ analyze:
 # Analyze committed HEAD in REPO and print the versioned JSON report.
 json:
 	cargo run --locked -- analyze "$(REPO)" --json
+
+# Render every contribution badge and the full report into a dedicated directory.
+badge:
+	cargo run --locked -- badge "$(REPO)" --out-dir "$(OUT_DIR)"

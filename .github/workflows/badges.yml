@@ -1,0 +1,46 @@
+# Purpose: Dogfood source-built contribution badges on main.
+# Triggers: Every push to main.
+# Production effect: Replace the generated-only badges branch with a checked lease.
+# Gates: Full checkout, locked release build, rendering and current remote main SHA.
+# External dependencies: GitHub-hosted ubuntu-latest, crates.io and GitHub Git with github.token.
+# Failure owner: avhn, GitHub Actions run status and logs.
+# Budgets: Initial estimate set 2026-11-08; remeasure successful runs with 2x headroom.
+name: Badges
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: badges
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+jobs:
+  publish:
+    name: Publish packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-11-08
+        with:
+          toolchain: stable
+      - name: Restore dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build packages
+        run: cargo build --release --locked
+      - name: Publish contribution badges
+        uses: ./
+        with:
+          binary: target/release/git-credit
+          source-branch: main
+          publish-branch: badges

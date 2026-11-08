@@ -1,3 +1,6 @@
 /target
 /lcov.info
 *.profraw
+/.git-credit/
+/dist/
+__pycache__/

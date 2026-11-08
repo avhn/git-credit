@@ -116,6 +116,9 @@ jobs:
       - name: Run tooling tests
         if: runner.os == 'Linux'
         run: tools/tests/check-commit-msg.test.sh
+      - name: Run action helper tests
+        if: runner.os == 'Linux'
+        run: python3 -I tools/tests/action_helpers_test.py
       - name: Install cargo-llvm-cov
         if: runner.os == 'Linux'
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
