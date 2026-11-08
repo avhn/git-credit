@@ -284,3 +284,15 @@ fn refuses_symlinked_output() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(files(outside.path()), std::collections::BTreeMap::new());
 }
+
+/// A symlinked directory inside the checkout must not redirect a relative output path.
+#[cfg(unix)]
+#[test]
+fn refuses_relative_output_through_symlinked_component() {
+    let repo = fixture();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), repo.path().join("docs")).unwrap();
+    let result = cli(repo.path(), &["badge", "--out-dir", "docs/badges"]);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(files(outside.path()), std::collections::BTreeMap::new());
+}

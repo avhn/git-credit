@@ -190,8 +190,20 @@ fn import(source: &str) -> anyhow::Result<Report> {
 }
 
 /// Refuse symlinked output components to avoid following an author-controlled path.
+///
+/// A relative path is resolved inside the checkout, where a committed symlink could
+/// redirect writes, so every component is checked. An absolute path was chosen by
+/// the caller, and system symlinks above it (for example macOS `/var` pointing to
+/// `/private/var`) are legitimate, so only the path itself is checked.
 fn check_path(path: &Path) -> anyhow::Result<()> {
-    for ancestor in path.ancestors() {
+    let checked: Vec<&Path> = if path.is_absolute() {
+        vec![path]
+    } else {
+        path.ancestors()
+            .filter(|ancestor| !ancestor.as_os_str().is_empty())
+            .collect()
+    };
+    for ancestor in checked {
         match fs::symlink_metadata(ancestor) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 bail!("refusing symlinked badge output {}", ancestor.display())
