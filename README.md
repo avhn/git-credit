@@ -8,7 +8,7 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: Phase 3 complete.** `analyze` defaults to token-level attribution and
+> **Status: v0.1.0.** All planned phases are complete. `analyze` defaults to token-level attribution and
 > merge-aware full-history replay. Reports stay in line-equivalent units. Use
 > `--granularity line` for the legacy line rules. These metrics describe provenance,
 > not a person's value.
@@ -47,6 +47,16 @@ Attribution rules:
 - **Identities merge** through `.mailmap`, and `Co-authored-by` trailers split credit.
 - **Noise is excluded:** lockfiles, generated and vendored code, binaries and
   configurable paths.
+
+## Install
+
+Prebuilt binaries for Linux (x86_64, ARM64), macOS (Intel, Apple Silicon) and Windows
+(x86_64) are attached to each [GitHub release](https://github.com/avhn/git-credit/releases),
+with a `SHA256SUMS` file. Or build from source:
+
+```console
+$ cargo install --git https://github.com/avhn/git-credit --tag v0.1.0 --locked git-credit
+```
 
 ## Usage
 
@@ -194,7 +204,7 @@ tools/           repository policy scripts and their tests
 | 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
 | 2     | Language-agnostic token attribution, merge-aware history, bulk-edit detection             | Done |
 | 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Done     |
-| 4     | SVG badges and cards, shields.io endpoints, reusable GitHub Action and tagged binaries   | Implemented; hosted release/publication pending |
+| 4     | SVG badges and cards, shields.io endpoints, reusable GitHub Action and tagged binaries   | Done |
 
 Details and design decisions: [docs/PLAN.md](docs/PLAN.md).
 

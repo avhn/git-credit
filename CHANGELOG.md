@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-09
+
 ### Changed
 
 - Algorithm version 4 adds bounded fuzzy same-commit token moves, preserving matched
@@ -102,3 +104,6 @@ All notable changes to this project are documented here. The format follows
 - Use exact bit-parallel LCS for long lines with bounded alphabets, cache character
   frequencies, prune provably inferior pairs, and index physical move prefixes.
   Scores and deterministic tie-breaking remain unchanged.
+
+[Unreleased]: https://github.com/avhn/git-credit/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/avhn/git-credit/releases/tag/v0.1.0
