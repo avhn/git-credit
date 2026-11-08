@@ -12,6 +12,8 @@ categories = ["development-tools"]
 
 [dependencies]
 credit-core.workspace = true
+gix = { version = "0.90", default-features = false, features = ["sha1", "revision", "mailmap", "blob-diff"] }
+
 
 [lints]
 workspace = true
