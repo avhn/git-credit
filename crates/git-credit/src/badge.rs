@@ -97,6 +97,8 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             json: true,
             by_email: false,
             keep: None,
+            granularity: None,
+            no_bulk_discount: false,
             exclude: Vec::new(),
             depth: 1,
             no_color: true,
