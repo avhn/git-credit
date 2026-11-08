@@ -39,6 +39,15 @@ enum Theme {
 /// Badge command arguments; analysis policy comes from the same root config as analyze.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Badge {
+    /// Disable reading and writing the incremental replay cache.
+    #[arg(long)]
+    no_cache: bool,
+    /// Override the cache directory (default: inside the repository Git directory).
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
+    /// Retained first-parent ancestor snapshots in addition to HEAD.
+    #[arg(long, default_value_t = 64)]
+    cache_depth: usize,
     /// Repository path; ignored when importing a report with --from.
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -92,6 +101,9 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             .with_context(|| format!("cannot read report {}", path.display()))?
     } else {
         let analysis = Analyze {
+            no_cache: args.no_cache,
+            cache_dir: args.cache_dir.clone(),
+            cache_depth: args.cache_depth,
             path: args.path.clone(),
             first_parent: false,
             json: true,
@@ -110,6 +122,9 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             settings.excluded.is_match(path)
         })?;
         if args.verbose > 0 {
+            for diagnostic in &report.cache_diagnostics {
+                eprintln!("{}", output::plain(diagnostic));
+            }
             for warning in &report.warnings {
                 eprintln!("warning: {}", output::plain(warning));
             }

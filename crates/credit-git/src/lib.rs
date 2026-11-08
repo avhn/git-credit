@@ -9,6 +9,7 @@
 //! ```
 #![deny(missing_docs)]
 
+mod cache;
 mod history;
 mod identities;
 mod replay;
@@ -124,9 +125,23 @@ impl Granularity {
     }
 }
 
+/// Optional disk cache configuration. The caller must supply all exclusion rules
+/// as a stable key because an opaque exclusion callback cannot be fingerprinted.
+#[derive(Debug, Clone)]
+pub struct CacheOptions {
+    /// Override directory; `None` selects `<git-dir>/git-credit/cache`.
+    pub directory: Option<PathBuf>,
+    /// Number of first-parent ancestors retained in addition to HEAD.
+    pub depth: usize,
+    /// Complete exclusion-policy identifier, including built-in rules.
+    pub exclusions: Vec<String>,
+}
+
 /// Analysis policy, independent of CLI serialization and glob implementation.
 #[derive(Debug, Clone)]
 pub struct Options {
+    /// Disk cache, disabled for library callers without an exclusion fingerprint.
+    pub cache: Option<CacheOptions>,
     /// Attribution units, token by default.
     pub granularity: Granularity,
     /// Preserve bulk-renamed token owners and charge one line per mapping/file.
@@ -147,6 +162,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            cache: None,
             granularity: Granularity::default(),
             bulk_discount: true,
             walk: Walk::default(),
@@ -182,13 +198,15 @@ pub struct Directory {
 /// Deterministic analysis output. All credit amounts are millionths of a line.
 #[derive(Debug)]
 pub struct Report {
+    /// Cache diagnostics for verbose stderr only, never part of report JSON.
+    pub cache_diagnostics: Vec<String>,
     /// Attribution units used for this report.
     pub granularity: Granularity,
     /// Commits with at least one discounted bulk mapping.
     pub bulk_edit_commits: u64,
     /// History selection used for this report.
     pub walk: Walk,
-    /// Peak number of retained commit tree states during replay.
+    /// Peak active replay tree states, excluding snapshots retained for the cache.
     pub peak_retained_states: usize,
     /// Full analyzed HEAD object ID.
     pub head: String,

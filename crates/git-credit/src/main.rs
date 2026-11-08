@@ -26,6 +26,15 @@ enum Command {
 #[derive(Debug, clap::Args)]
 #[allow(clippy::struct_excessive_bools)] // Independent clap switches, not mutually exclusive application states.
 struct Analyze {
+    /// Disable reading and writing the incremental replay cache.
+    #[arg(long)]
+    no_cache: bool,
+    /// Override the cache directory (default: inside the repository Git directory).
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
+    /// Retain this many first-parent ancestor snapshots in addition to HEAD.
+    #[arg(long, default_value_t = 64)]
+    cache_depth: usize,
     /// Attribution granularity [default: token]; reports remain in line units.
     #[arg(long, value_parser = ["line", "token"])]
     granularity: Option<String>,
@@ -96,6 +105,9 @@ fn run(args: &Analyze) -> anyhow::Result<()> {
             eprintln!("warning: {}", output::plain(warning));
         }
         if args.verbose > 0 {
+            for diagnostic in &report.cache_diagnostics {
+                eprintln!("{}", output::plain(diagnostic));
+            }
             eprintln!(
                 "Analyzed {} commits; {} identities; peak retained states: {}",
                 report.commits_analyzed,

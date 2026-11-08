@@ -21,6 +21,29 @@ pub fn analyze(
     options: &Options,
     excluded: &dyn Fn(&str) -> bool,
 ) -> Result<Report, Error> {
+    let mut resumed = false;
+    match analyze_attempt(path, options, excluded, true, &mut resumed) {
+        Err(Error::Core(error)) if resumed => {
+            let mut report = analyze_attempt(path, options, excluded, false, &mut false)?;
+            report.cache_diagnostics.insert(
+                0,
+                format!("Cache resumed replay failed: {error}; retrying cold without cached state"),
+            );
+            Ok(report)
+        }
+        result => result,
+    }
+}
+
+/// Perform one isolated attempt. Disable cache reads on retry, but publish a
+/// rebuilt generation only after replay and all report accounting have succeeded.
+fn analyze_attempt(
+    path: &Path,
+    options: &Options,
+    excluded: &dyn Fn(&str) -> bool,
+    read_cache: bool,
+    resumed: &mut bool,
+) -> Result<Report, Error> {
     options.policy.validate()?;
     let repo = gix::discover(path).map_err(git_error)?;
     if repo.is_shallow().map_err(git_error)? {
@@ -32,95 +55,460 @@ pub fn analyze(
     let head = repo.head_commit().map_err(git_error)?;
     let mut authors = Authors::load(&repo, &head)?;
     let mut history = crate::history::History::load(&repo, head.id, options.walk)?;
-    let mut state = Replay {
-        files: BTreeMap::new(),
-        ledger: Ledger::default(),
-        warnings: BTreeSet::new(),
-        formatting: 0,
-    };
-    let mut cache = raw_diff_cache(repo.object_hash(), options.max_file_size);
-    let mut retained: BTreeMap<gix::ObjectId, Files> = BTreeMap::new();
-    let mut peak_retained_states = 0;
-    let mut bulk_edit_commits = 0;
-    let mut bulk_examples = Vec::new();
+    // Resolve identities in cold-walk order: deduplication affects rounding.
+    let mut identities = BTreeMap::new();
     for id in &history.order {
-        let commit = repo.find_commit(*id).map_err(git_error)?;
-        let shares = authors.commit(&commit, options)?;
-        let tree = commit.tree().map_err(git_error)?;
-        let parents = history
-            .parents
-            .get(id)
-            .ok_or_else(|| Error::InvalidInput("missing scheduled commit".into()))?;
-        let previous = if let Some(parent) = parents.first() {
-            state.files = retained
-                .get(parent)
-                .ok_or_else(|| Error::InvalidInput("missing parent state".into()))?
-                .clone();
-            repo.find_commit(*parent)
-                .map_err(git_error)?
-                .tree()
-                .map_err(git_error)?
-        } else {
-            state.files = BTreeMap::new();
-            repo.empty_tree()
-        };
-        let changes = tree_changes(&previous, &tree, &mut cache)?;
-        cache.clear_resource_cache();
-        let other_parents = merge_parents(&repo, parents, &retained, &tree, &mut cache)?;
-        if state.commit(
-            &repo,
-            changes,
-            shares.authors(),
-            options,
-            excluded,
-            &other_parents,
-        )? {
-            bulk_edit_commits += 1;
-            if bulk_examples.len() < 5 {
-                bulk_examples.push(id.to_string());
-            }
-        }
-        if options.walk == crate::Walk::FirstParent && commit.parent_ids().count() > 1 {
-            state.warnings.insert("Merge attribution is approximate: first-parent merge diffs credit the merge author and co-authors.".into());
-        }
-        // Include the current output state as well as parents still being consumed.
-        peak_retained_states = peak_retained_states.max(retained.len() + 1);
-        for parent in parents {
-            if let Some(count) = history.remaining_children.get_mut(parent) {
-                *count -= 1;
-                if *count == 0 {
-                    retained.remove(parent);
-                }
-            }
-        }
-        retained.insert(*id, std::mem::take(&mut state.files));
+        identities.insert(
+            id.to_string(),
+            authors.commit(&repo.find_commit(*id).map_err(git_error)?, options)?,
+        );
     }
+    let groups = authors.keys();
+    let mut diagnostics = Vec::new();
+    let directory = options.cache.as_ref().map(|cache| {
+        cache
+            .directory
+            .clone()
+            .unwrap_or_else(|| repo.git_dir().join("git-credit/cache"))
+    });
+    let (pack, retained) = prepare_cache(
+        &repo,
+        directory.as_deref().filter(|_| read_cache),
+        &history,
+        &identities,
+        &groups,
+        options,
+        &mut diagnostics,
+    )?;
+    *resumed = !pack.commits.is_empty();
+    let wanted = snapshot_ids(
+        &history,
+        head.id,
+        options.cache.as_ref().map_or(0, |cache| cache.depth),
+    );
+    let snapshots: BTreeMap<_, _> = retained
+        .iter()
+        .filter(|(id, _)| wanted.contains(*id))
+        .map(|(id, files)| (*id, files.clone()))
+        .collect();
+    let state = Replay::default();
+    let mut run = ReplayRun {
+        pack,
+        retained,
+        snapshots,
+        state,
+        peak: 0,
+        replayed: 0,
+    };
+    run.execute(&repo, &mut history, &identities, options, excluded, &wanted)?;
+    let ReplayRun {
+        mut pack,
+        mut retained,
+        snapshots,
+        mut state,
+        peak: peak_retained_states,
+        replayed,
+    } = run;
     state.files = retained
         .remove(&head.id)
         .ok_or_else(|| Error::InvalidInput("missing HEAD state".into()))?;
+    let bulk_edit_commits = aggregate(&mut state, &pack, &history)?;
+    pack.identity_key = crate::cache::identity_key(pack.commits.keys(), &identities, &groups)?;
+    pack.groups = groups;
     state.ledger.ownership = scoring::ownership(state.files.values().map(|file| &file.state))?;
-    if !bulk_examples.is_empty() {
-        state.warnings.insert(format!(
-            "Bulk edits discounted in {bulk_edit_commits} commits; examples: {}",
-            bulk_examples.join(", ")
-        ));
-    }
     let mut directories = directories(&state.files, options.depth)?;
     let authors = authors.finish(options, &mut state.ledger, &mut directories)?;
+    let commits_analyzed = u64::try_from(history.order.len())
+        .map_err(|_| Error::InvalidInput("too many commits".into()))?;
+    persist_cache(
+        directory.as_deref(),
+        &mut pack,
+        head.id,
+        &snapshots,
+        replayed,
+        &mut diagnostics,
+    );
     Ok(Report {
+        cache_diagnostics: diagnostics,
         granularity: options.granularity,
         bulk_edit_commits,
         walk: options.walk,
         peak_retained_states,
         head: head.id.to_string(),
-        commits_analyzed: u64::try_from(history.order.len())
-            .map_err(|_| Error::InvalidInput("too many commits".into()))?,
+        commits_analyzed,
         formatting_commits: state.formatting,
         authors,
         ledger: state.ledger,
         directories,
         warnings: state.warnings.into_iter().collect(),
     })
+}
+
+/// Prepare an empty generation or a fully validated resumable generation.
+fn prepare_cache(
+    repo: &gix::Repository,
+    directory: Option<&Path>,
+    history: &crate::history::History,
+    identities: &BTreeMap<String, credit_core::LineOwner>,
+    groups: &BTreeMap<u32, String>,
+    options: &Options,
+    diagnostics: &mut Vec<String>,
+) -> Result<(crate::cache::Pack, BTreeMap<gix::ObjectId, Files>), Error> {
+    let key = crate::cache::key(options)?;
+    if let Some(directory) = directory {
+        match resume(repo, directory, &key, history, identities, groups, options) {
+            Ok((pack, snapshots)) => {
+                diagnostics.push(format!(
+                    "Cache resumed: {} processed commits",
+                    pack.commits.len()
+                ));
+                return Ok((pack, snapshots));
+            }
+            Err(error) => diagnostics.push(format!("Cache cold replay: {error}")),
+        }
+    }
+    Ok((
+        crate::cache::Pack {
+            key,
+            ..Default::default()
+        },
+        BTreeMap::new(),
+    ))
+}
+
+/// Report optional cache write failures without changing analysis output.
+fn persist_cache(
+    directory: Option<&Path>,
+    pack: &mut crate::cache::Pack,
+    head: gix::ObjectId,
+    snapshots: &BTreeMap<gix::ObjectId, Files>,
+    replayed: usize,
+    diagnostics: &mut Vec<String>,
+) {
+    if let Some(directory) = directory {
+        pack.head = head.to_string();
+        match save_snapshots(directory, pack, snapshots) {
+            Ok(bytes) => diagnostics.push(format!("Cache replayed {replayed} new commits; {bytes} bytes (limit 268435456); {} snapshots", snapshots.len())),
+            Err(error) => diagnostics.push(format!("Cache not written: {error}")),
+        }
+    }
+}
+
+/// Mutable execution state shared across the ordered commit replay loop.
+struct ReplayRun {
+    pack: crate::cache::Pack,
+    retained: BTreeMap<gix::ObjectId, Files>,
+    snapshots: BTreeMap<gix::ObjectId, Files>,
+    state: Replay,
+    peak: usize,
+    replayed: usize,
+}
+impl ReplayRun {
+    /// Replay only unprocessed commits after all cache boundaries are validated.
+    fn execute(
+        &mut self,
+        repo: &gix::Repository,
+        history: &mut crate::history::History,
+        identities: &BTreeMap<String, credit_core::LineOwner>,
+        options: &Options,
+        excluded: &dyn Fn(&str) -> bool,
+        wanted: &BTreeSet<gix::ObjectId>,
+    ) -> Result<(), Error> {
+        let mut cache = raw_diff_cache(repo.object_hash(), options.max_file_size);
+        for id in &history.order {
+            if self.pack.commits.contains_key(&id.to_string()) {
+                continue;
+            }
+            let commit = repo.find_commit(*id).map_err(git_error)?;
+            let shares = identities
+                .get(&id.to_string())
+                .ok_or_else(|| Error::InvalidInput("missing commit identity".into()))?;
+            let tree = commit.tree().map_err(git_error)?;
+            let parents = history
+                .parents
+                .get(id)
+                .ok_or_else(|| Error::InvalidInput("missing scheduled commit".into()))?;
+            let previous = if let Some(parent) = parents.first() {
+                self.state.files = self
+                    .retained
+                    .get(parent)
+                    .ok_or_else(|| Error::InvalidInput("missing parent state".into()))?
+                    .clone();
+                repo.find_commit(*parent)
+                    .map_err(git_error)?
+                    .tree()
+                    .map_err(git_error)?
+            } else {
+                self.state.files = BTreeMap::new();
+                repo.empty_tree()
+            };
+            let changes = tree_changes(&previous, &tree, &mut cache)?;
+            cache.clear_resource_cache();
+            let other_parents = merge_parents(repo, parents, &self.retained, &tree, &mut cache)?;
+            let bulk = self.state.commit(
+                repo,
+                changes,
+                shares.authors(),
+                options,
+                excluded,
+                &other_parents,
+            )?;
+            if options.walk == crate::Walk::FirstParent && commit.parent_ids().count() > 1 {
+                self.state.warnings.insert("Merge attribution is approximate: first-parent merge diffs credit the merge author and co-authors.".into());
+            }
+            self.pack.commits.insert(
+                id.to_string(),
+                crate::cache::Commit {
+                    identity: crate::cache::shares(shares),
+                    labor: std::mem::take(&mut self.state.ledger.labor)
+                        .into_iter()
+                        .map(|(id, amount)| (id.0, amount))
+                        .collect(),
+                    formatting: self.state.formatting > 0,
+                    bulk,
+                    warnings: std::mem::take(&mut self.state.warnings)
+                        .into_iter()
+                        .collect(),
+                },
+            );
+            self.state.formatting = 0;
+            self.replayed += 1;
+            self.peak = self.peak.max(self.retained.len() + 1);
+            for parent in parents {
+                if let Some(count) = history.remaining_children.get_mut(parent) {
+                    *count -= 1;
+                    if *count == 0 {
+                        self.retained.remove(parent);
+                    }
+                }
+            }
+            if wanted.contains(id) {
+                self.snapshots.insert(*id, self.state.files.clone());
+            }
+            self.retained
+                .insert(*id, std::mem::take(&mut self.state.files));
+        }
+        Ok(())
+    }
+}
+
+/// Fold commit accounting in cold replay order, including bounded bulk examples.
+fn aggregate(
+    state: &mut Replay,
+    pack: &crate::cache::Pack,
+    history: &crate::history::History,
+) -> Result<u64, Error> {
+    let mut bulk_edit_commits = 0;
+    let mut bulk_examples = Vec::new();
+    for id in &history.order {
+        let record = pack
+            .commits
+            .get(&id.to_string())
+            .ok_or_else(|| Error::InvalidInput("missing commit accounting".into()))?;
+        state.ledger.add_labor(
+            &record
+                .labor
+                .iter()
+                .map(|(id, amount)| (credit_core::AuthorId(*id), *amount))
+                .collect(),
+        )?;
+        state.formatting += u64::from(record.formatting);
+        state.warnings.extend(record.warnings.iter().cloned());
+        if record.bulk {
+            bulk_edit_commits += 1;
+            if bulk_examples.len() < 5 {
+                bulk_examples.push(id.to_string());
+            }
+        }
+    }
+    if !bulk_examples.is_empty() {
+        state.warnings.insert(format!(
+            "Bulk edits discounted in {bulk_edit_commits} commits; examples: {}",
+            bulk_examples.join(", ")
+        ));
+    }
+    Ok(bulk_edit_commits)
+}
+
+/// Retain HEAD and its first-parent chain, independent of full-walk order.
+fn snapshot_ids(
+    history: &crate::history::History,
+    head: gix::ObjectId,
+    depth: usize,
+) -> BTreeSet<gix::ObjectId> {
+    let mut result = BTreeSet::new();
+    let mut next = Some(head);
+    while let Some(id) = next {
+        result.insert(id);
+        if result.len() > depth {
+            break;
+        }
+        next = history
+            .parents
+            .get(&id)
+            .and_then(|parents| parents.first())
+            .copied();
+    }
+    result
+}
+
+/// Validate processed ancestry, identities and resume boundaries before exposing
+/// any cached state. Failure leaves the caller free to perform a cold replay.
+fn resume(
+    repo: &gix::Repository,
+    directory: &Path,
+    key: &str,
+    history: &crate::history::History,
+    identities: &BTreeMap<String, credit_core::LineOwner>,
+    groups: &BTreeMap<u32, String>,
+    options: &Options,
+) -> Result<(crate::cache::Pack, BTreeMap<gix::ObjectId, Files>), Error> {
+    let mut pack = crate::cache::load(directory)?;
+    let invalid = |message: &str| Error::InvalidInput(message.to_owned());
+    if pack.key != key {
+        return Err(invalid("cache version or attribution policy changed"));
+    }
+    let head = gix::ObjectId::from_hex(pack.head.as_bytes()).map_err(git_error)?;
+    if !history.parents.contains_key(&head) {
+        return Err(invalid("cached HEAD is not an ancestor (history rewrite)"));
+    }
+    let mut ancestors = BTreeSet::new();
+    let mut pending = vec![head];
+    while let Some(id) = pending.pop() {
+        if ancestors.insert(id.to_string()) {
+            pending.extend(history.parents.get(&id).into_iter().flatten().copied());
+        }
+    }
+    if !ancestors.iter().eq(pack.commits.keys()) {
+        return Err(invalid(
+            "processed commit set does not match cached ancestry",
+        ));
+    }
+    if pack.identity_key != crate::cache::identity_key(pack.commits.keys(), identities, groups)? {
+        return Err(invalid("identity digest changed (mailmap or grouping)"));
+    }
+    crate::cache::remap_identities(&mut pack, groups)?;
+    let author_count = identities
+        .values()
+        .flat_map(credit_core::LineOwner::authors)
+        .map(|(id, _)| id.0 as usize + 1)
+        .max()
+        .unwrap_or(0);
+    let mut cached_labor = Ledger::default();
+    for (id, record) in &pack.commits {
+        cached_labor.add_labor(
+            &record
+                .labor
+                .iter()
+                .map(|(id, amount)| (credit_core::AuthorId(*id), *amount))
+                .collect(),
+        )?;
+        if identities.get(id).map(crate::cache::shares).as_ref() != Some(&record.identity) {
+            return Err(invalid(
+                "identity digest changed (mailmap, grouping or replay identity order)",
+            ));
+        }
+        if record.labor.keys().any(|id| *id as usize >= author_count) {
+            return Err(invalid("cached labor has an invalid author"));
+        }
+    }
+    validate_boundaries(&pack, history, &ancestors, options)?;
+    if !pack.snapshots.contains_key(&pack.head) {
+        return Err(invalid("missing cached HEAD snapshot"));
+    }
+    let mut retained = BTreeMap::new();
+    let mut shared = BTreeMap::new();
+    for (id, snapshot) in &pack.snapshots {
+        if !ancestors.contains(id) {
+            return Err(invalid("snapshot outside processed ancestry"));
+        }
+        let id = gix::ObjectId::from_hex(id.as_bytes()).map_err(git_error)?;
+        let mut files = BTreeMap::new();
+        for (path, hash) in snapshot {
+            let key = (
+                hash.clone(),
+                crate::normalization(path) == credit_core::NormalizationMode::IgnoreIndentation,
+            );
+            let file = if let Some(file) = shared.get(&key) {
+                Arc::clone(file)
+            } else {
+                let (id, state) =
+                    crate::cache::restore_file(repo, &pack, hash, path, options, author_count)?;
+                let file = Arc::new(TrackedFile { id, state });
+                shared.insert(key, Arc::clone(&file));
+                file
+            };
+            files.insert(path.clone(), file);
+        }
+        retained.insert(id, files);
+    }
+    Ok((pack, retained))
+}
+
+/// Require every old replay boundary and requested retained ancestor snapshot.
+fn validate_boundaries(
+    pack: &crate::cache::Pack,
+    history: &crate::history::History,
+    ancestors: &BTreeSet<String>,
+    options: &Options,
+) -> Result<(), Error> {
+    let invalid = |message: &str| Error::InvalidInput(message.to_owned());
+    for id in &history.order {
+        if ancestors.contains(&id.to_string()) {
+            continue;
+        }
+        for parent in history.parents.get(id).into_iter().flatten() {
+            if ancestors.contains(&parent.to_string())
+                && !pack.snapshots.contains_key(&parent.to_string())
+            {
+                return Err(invalid(
+                    "required processed parent is outside cached snapshot depth",
+                ));
+            }
+        }
+    }
+    if let Some(head) = history.order.last() {
+        let wanted = snapshot_ids(
+            history,
+            *head,
+            options.cache.as_ref().map_or(0, |cache| cache.depth),
+        );
+        if wanted.iter().any(|id| {
+            ancestors.contains(&id.to_string()) && !pack.snapshots.contains_key(&id.to_string())
+        }) {
+            return Err(invalid(
+                "requested cache depth requires older snapshots; rebuilding",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Replace the generation with selected snapshots and only their reachable files.
+fn save_snapshots(
+    directory: &Path,
+    pack: &mut crate::cache::Pack,
+    snapshots: &BTreeMap<gix::ObjectId, Files>,
+) -> Result<usize, Error> {
+    pack.snapshots.clear();
+    pack.files.clear();
+    let mut encoded = BTreeMap::new();
+    for (id, files) in snapshots {
+        let mut snapshot = BTreeMap::new();
+        for (path, file) in files {
+            let pointer = Arc::as_ptr(file);
+            let hash = if let Some(hash) = encoded.get(&pointer) {
+                String::clone(hash)
+            } else {
+                let hash = crate::cache::store_file(pack, file.id, &file.state)?;
+                encoded.insert(pointer, hash.clone());
+                hash
+            };
+            snapshot.insert(path.clone(), hash);
+        }
+        pack.snapshots.insert(id.to_string(), snapshot);
+    }
+    crate::cache::save(directory, pack)
 }
 
 /// Build other-parent views, including rename sources, without copying file maps.
@@ -310,6 +698,7 @@ impl Parent<'_> {
 }
 
 /// State bounded by live content plus transient changes for one commit.
+#[derive(Default)]
 struct Replay {
     files: Files,
     ledger: Ledger,

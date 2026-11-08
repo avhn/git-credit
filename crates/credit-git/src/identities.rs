@@ -63,6 +63,14 @@ impl Authors {
         })
     }
 
+    /// Stable grouping keys let cached numeric IDs follow the current cold walk.
+    pub(crate) fn keys(&self) -> BTreeMap<u32, String> {
+        self.ids
+            .iter()
+            .map(|(key, id)| (id.0, key.clone()))
+            .collect()
+    }
+
     /// Resolve participants and split once per distinct group. Count each email
     /// once per commit, even if repeated in trailers, for representative selection.
     pub(crate) fn commit(

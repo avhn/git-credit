@@ -29,6 +29,7 @@ const BUILT_INS: &[&str] = &[
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    cache: Option<bool>,
     granularity: Option<String>,
     bulk_discount: Option<bool>,
     walk: Option<String>,
@@ -115,6 +116,13 @@ impl Settings {
         }
         Ok(Self {
             options: credit_git::Options {
+                cache: (!args.no_cache && config.cache.unwrap_or(true)).then(|| {
+                    credit_git::CacheOptions {
+                        directory: args.cache_dir.clone(),
+                        depth: args.cache_depth,
+                        exclusions: patterns.clone(),
+                    }
+                }),
                 granularity,
                 bulk_discount: !args.no_bulk_discount && config.bulk_discount.unwrap_or(true),
                 walk: if args.first_parent {

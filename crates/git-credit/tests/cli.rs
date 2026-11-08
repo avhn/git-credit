@@ -402,7 +402,7 @@ fn exclusions_binary_size_and_json_contract() {
     fixture.write(".git-credit.toml", "max_file_size = 50\n");
     let report = fixture.json(&["--depth", "2"]);
     assert_eq!(report["schema_version"], 1);
-    assert_eq!(report["algorithm_version"], 3);
+    assert_eq!(report["algorithm_version"], 4);
     assert_eq!(report["head"].as_str().unwrap().len(), 40);
     assert_eq!(report["walk"], "full");
     assert_eq!(report["units"], "lines");
@@ -1120,3 +1120,121 @@ fn token_bulk_warning_examples_are_bounded_and_quiet_keeps_json_warnings() {
     fixture.write(".git-credit.toml", "bulk_discount = 'invalid'\n");
     assert_eq!(fixture.cli(&["--json"]).status.code(), Some(1));
 }
+
+/// Compare serialized bytes, not parsed values, and assert the expected cache path.
+fn cache_matches_cold(fixture: &Fixture, flags: &[&str], diagnostic: &str) {
+    let mut args = vec!["--json", "-v"];
+    args.extend_from_slice(flags);
+    let cached = fixture.cli(&args);
+    args.push("--no-cache");
+    let cold = fixture.cli(&args);
+    assert!(
+        cached.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    assert!(
+        cold.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cold.stderr)
+    );
+    assert_eq!(cached.stdout, cold.stdout);
+    assert!(
+        String::from_utf8_lossy(&cached.stderr).contains(diagnostic),
+        "{}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+}
+
+#[test]
+fn cache_linear_corruption_options_and_identity_changes_match_cold_bytes() {
+    for token in [false, true] {
+        let fixture = if token {
+            Fixture::token()
+        } else {
+            Fixture::new()
+        };
+        fixture.write("a.rs", "alpha beta\ngamma delta\nepsilon zeta\n");
+        fixture.commit("Alice", "alice@example.test", "root");
+        cache_matches_cold(&fixture, &[], "Cache cold replay");
+        fixture.write("a.rs", "alpha beta\ngamma changed\nepsilon zeta\n");
+        fixture.commit("Bob", "bob@example.test", "append");
+        cache_matches_cold(&fixture, &[], "replayed 1 new commits");
+        cache_matches_cold(&fixture, &[], "replayed 0 new commits");
+        cache_matches_cold(&fixture, &["--exclude", "a.rs"], "policy changed");
+        cache_matches_cold(&fixture, &[], "policy changed");
+        fixture.write(
+            ".mailmap",
+            "Alice <alice@example.test> Bob <bob@example.test>\n",
+        );
+        fixture.commit("Alice", "alice@example.test", "mailmap");
+        cache_matches_cold(&fixture, &[], "identity digest changed");
+        let path = fixture.dir.path().join(".git/git-credit/cache/replay.pack");
+        let bytes = fs::read(&path).unwrap();
+        let mut corrupt = bytes.clone();
+        *corrupt.last_mut().unwrap() ^= 1;
+        fs::write(&path, corrupt).unwrap();
+        cache_matches_cold(&fixture, &[], "checksum mismatch");
+        fs::write(&path, &bytes[..12]).unwrap();
+        cache_matches_cold(&fixture, &[], "truncated");
+        fixture.git(&["checkout", "--orphan", "rewritten"]);
+        fixture.git(&["rm", "-rf", "."]);
+        fixture.write("new.rs", "rewritten root\n");
+        fixture.commit("Alice", "alice@example.test", "rewrite");
+        cache_matches_cold(&fixture, &[], "history rewrite");
+    }
+}
+
+#[test]
+fn cache_merge_resumes_recent_forks_and_falls_back_beyond_depth() {
+    for depth in ["0", "64"] {
+        for token in [false, true] {
+            let fixture = if token {
+                Fixture::token()
+            } else {
+                Fixture::new()
+            };
+            fixture.write("a.rs", "original\n");
+            fixture.commit("Alice", "alice@example.test", "root");
+            fixture.git(&["branch", "topic"]);
+            fixture.write("main.rs", "main work\n");
+            fixture.commit("Bob", "bob@example.test", "main");
+            cache_matches_cold(&fixture, &["--cache-depth", depth], "Cache cold replay");
+            fixture.git(&["checkout", "topic"]);
+            fixture.write("topic.rs", "branch work\n");
+            fixture.commit("Carol", "carol@example.test", "topic");
+            fixture.git(&["checkout", "main"]);
+            fixture.git(&["merge", "--no-ff", "topic", "-m", "merge"]);
+            let diagnostic = if depth == "0" {
+                "outside cached snapshot depth"
+            } else {
+                "replayed 2 new commits"
+            };
+            cache_matches_cold(&fixture, &["--cache-depth", depth], diagnostic);
+        }
+    }
+}
+
+#[test]
+fn cache_controls_never_write_when_disabled_and_support_override() {
+    let fixture = Fixture::token();
+    fixture.write("a.rs", "code\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.json(&["--no-cache"]);
+    assert!(!fixture.dir.path().join(".git/git-credit/cache").exists());
+    fixture.write(".git-credit.toml", "cache = false\n");
+    fixture.json(&[]);
+    assert!(!fixture.dir.path().join(".git/git-credit/cache").exists());
+    fixture.write(".git-credit.toml", "cache = true\n");
+    let cache = tempfile::tempdir().unwrap();
+    cache_matches_cold(
+        &fixture,
+        &["--cache-dir", cache.path().to_str().unwrap()],
+        "Cache cold replay",
+    );
+    assert!(cache.path().join("replay.pack").is_file());
+    assert!(!fixture.dir.path().join(".git/git-credit/cache").exists());
+}
+
+#[path = "support/cache_overflow.rs"]
+mod cache_overflow;
