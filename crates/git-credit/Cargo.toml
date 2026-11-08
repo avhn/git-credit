@@ -16,6 +16,14 @@ categories = ["command-line-utilities", "development-tools"]
 clap.workspace = true
 credit-core.workspace = true
 credit-git.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.2"
+globset = "0.4"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
