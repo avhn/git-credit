@@ -8,9 +8,9 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: early development.** The repository scaffold and CI are in place; the
-> `analyze` command is being built (see [Roadmap](#roadmap)). Nothing here is
-> released yet.
+> **Status: early development.** The pure line-attribution engine, repository
+> scaffold and CI are in place. Repository replay and the `analyze` command are
+> not implemented yet (see [Roadmap](#roadmap)). Nothing here is released yet.
 
 ## Why
 
@@ -28,8 +28,10 @@ disappears from the numbers entirely.
 
 Attribution rules:
 
-- **Formatting is free.** Whitespace, re-indentation and line wrapping earn no credit
-  and take none away.
+- **Formatting is free within the normalization rules.** Trailing whitespace and
+  CRLF changes earn no credit and take none away. Leading indentation is ignored
+  only when the language permits it. Interior whitespace and line wrapping can
+  still be meaningful changes in the line-level engine.
 - **Small edits keep the original author.** A line that changes only slightly stays
   with its author; the editor gets labor for the change, not ownership of the line.
   The similarity threshold is configurable. Later versions attribute individual tokens.

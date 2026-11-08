@@ -12,6 +12,24 @@
 //! The crate performs no I/O, reads no clocks and holds no global state, so
 //! every result is a deterministic function of its inputs. Repository access
 //! lives in the `credit-git` crate.
+//!
+//! Ownership and labor use millionths of a physical line. Similarity is measured
+//! over Unicode scalar values, not tokens or grapheme clusters. The caller must
+//! reconcile same-commit moves before accumulating labor and recompute ownership
+//! from live files after deletions.
+//!
+//! ```
+//! use credit_core::{AuthorId, FileState, Ledger, LineOwner, NormalizationMode,
+//!     Policy, apply_change};
+//! let authors = LineOwner::equal(&[AuthorId(0), AuthorId(1)])?;
+//! let change = apply_change(&FileState::default(), "hello\n", authors.authors(),
+//!     NormalizationMode::IgnoreIndentation, Policy::default())?;
+//! let mut ledger = Ledger::default();
+//! ledger.add_labor(&change.labor)?;
+//! ledger.recount([&change.state])?;
+//! assert_eq!(ledger.ownership[&AuthorId(0)], 500_000);
+//! # Ok::<(), credit_core::Error>(())
+//! ```
 #![deny(missing_docs)]
 
 use std::fmt;
@@ -21,7 +39,17 @@ use std::fmt;
 /// Reports embed this number so results computed by different releases are
 /// never silently compared. It changes whenever the same history and policy
 /// could produce different credit.
-pub const ALGORITHM_VERSION: u32 = 0;
+pub const ALGORITHM_VERSION: u32 = 1;
+
+mod engine;
+mod model;
+mod moves;
+
+pub use engine::{Change, ChangeKind, apply_change};
+pub use model::{
+    AuthorId, FileState, LaborDelta, Ledger, Line, LineOwner, NormalizationMode, Policy, SCALE,
+};
+pub use moves::reconcile_moves;
 
 /// Errors produced by the attribution engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,11 +61,20 @@ pub enum Error {
         /// The rejected value, in parts per thousand.
         per_mille: u32,
     },
+    /// Author shares must be nonempty, unique, positive, and sum to one line.
+    InvalidShares,
+    /// A fixed-point ledger cannot represent the requested total.
+    Overflow,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidShares => write!(
+                f,
+                "author shares must be unique, positive, and sum to 1000000"
+            ),
+            Self::Overflow => write!(f, "fixed-point credit total overflow"),
             Self::InvalidThreshold { name, per_mille } => {
                 write!(
                     f,
@@ -49,6 +86,10 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod attribution_tests;
 
 #[cfg(test)]
 mod tests {

@@ -97,6 +97,21 @@ with similarity `s` (0 to 1):
 Unpaired new lines are owned by the editor with labor 1. Deleted lines remove
 ownership but never remove past labor. `keep` is configurable in `.git-credit.toml`.
 
+The core implementation uses deterministic Myers diffs at both line and Unicode
+scalar-value character levels. Character similarity is twice the equal character
+count divided by the combined character count. Threshold comparisons use exact
+integer ratios. New lines are visited in order and each old line can be paired
+only once. If a replacement hunk has more than 250,000 old/new candidate pairs,
+pairing is skipped, the hunk is treated as a rewrite, and the core returns a
+`pairing_capped` warning flag for the report layer.
+
+Ownership and labor both use millionths of a line. Equal co-author ownership
+splits allocate remainder units to the earliest authors in caller order.
+Fractional labor rounds upward to the nearest millionth; cumulative integer
+apportionment splits that amount among commit authors without losing units.
+Blank physical lines count as lines; a terminal newline does not add a line.
+The presence or absence of the terminal newline alone is formatting.
+
 Phase 2 refines this to tokens: unchanged tokens keep their provenance, inserted
 and replaced tokens belong to the editor. The review of the original plan rejected
 fractional ownership shares because they made results depend on statement size.
@@ -106,7 +121,12 @@ fractional ownership shares because they made results depend on statement size.
 Phase 1: renames are followed by exact content match and by similarity between a
 deleted and an added path within the same commit. A line block that disappears
 from one file and appears unchanged in another in the same commit keeps its
-owners and earns no labor. Fuzzy cross-commit move detection is Phase 3.
+owners and earns no labor. The core's exact move pass requires at least three
+consecutive lines, orders paths lexicographically and positions ascending, and
+consumes each removed source line at most once. Copies therefore cannot multiply
+ownership. Only removed lines not retained by within-file pairing and inserted or
+rewritten destination lines participate. Reconcile all changes from one commit
+before accumulating labor. Fuzzy cross-commit move detection is Phase 3.
 
 ### Identities
 
