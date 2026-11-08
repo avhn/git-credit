@@ -29,6 +29,7 @@ const BUILT_INS: &[&str] = &[
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    walk: Option<String>,
     keep: Option<f64>,
     #[serde(default)]
     exclude: Vec<String>,
@@ -73,6 +74,11 @@ impl Settings {
                 _ => bail!("group_by must be 'name' or 'email'"),
             }
         };
+        let configured_walk = match config.walk.as_deref().unwrap_or("full") {
+            "full" => credit_git::Walk::Full,
+            "first-parent" => credit_git::Walk::FirstParent,
+            _ => bail!("walk must be 'full' or 'first-parent'"),
+        };
         let custom = if args.exclude.is_empty() {
             config.exclude
         } else {
@@ -94,6 +100,11 @@ impl Settings {
         }
         Ok(Self {
             options: credit_git::Options {
+                walk: if args.first_parent {
+                    credit_git::Walk::FirstParent
+                } else {
+                    configured_walk
+                },
                 policy: credit_core::Policy {
                     keep_per_mille: keep,
                 },

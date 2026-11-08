@@ -1,10 +1,14 @@
-//! First-parent object replay and live-tree aggregation.
+//! Merge-aware object replay and live-tree aggregation.
 
 use crate::{Directory, Error, Options, Report, git_error, identities::Authors, normalization};
-use credit_core::{ChangeKind, FileState, Ledger, apply_change, reconcile_moves};
+use credit_core::{
+    ChangeKind, FileState, Ledger, adopt_parent, apply_change, reconcile_merge_moves,
+    reconcile_parents,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
+    sync::Arc,
 };
 
 /// Analyze committed HEAD offline, applying `excluded` to repository-relative
@@ -29,20 +33,7 @@ pub fn analyze(
     }
     let head = repo.head_commit().map_err(git_error)?;
     let mut authors = Authors::load(&repo, &head)?;
-    let mut chain = Vec::new();
-    let mut cursor = Some(head.id);
-    while let Some(id) = cursor {
-        let commit = repo.find_commit(id).map_err(git_error)?;
-        let decoded = commit.decode().map_err(git_error)?;
-        cursor = decoded
-            .parents
-            .first()
-            .map(|hex| gix::ObjectId::from_hex(hex))
-            .transpose()
-            .map_err(git_error)?;
-        chain.push(id);
-    }
-    chain.reverse();
+    let mut history = crate::history::History::load(&repo, head.id, options.walk)?;
     let mut state = Replay {
         files: BTreeMap::new(),
         ledger: Ledger::default(),
@@ -50,25 +41,68 @@ pub fn analyze(
         formatting: 0,
     };
     let mut cache = raw_diff_cache(repo.object_hash(), options.max_file_size);
-    let mut previous = repo.empty_tree();
-    for id in &chain {
+    let mut retained: BTreeMap<gix::ObjectId, Files> = BTreeMap::new();
+    let mut peak_retained_states = 0;
+    for id in &history.order {
         let commit = repo.find_commit(*id).map_err(git_error)?;
         let shares = authors.commit(&commit, options)?;
         let tree = commit.tree().map_err(git_error)?;
+        let parents = history
+            .parents
+            .get(id)
+            .ok_or_else(|| Error::InvalidInput("missing scheduled commit".into()))?;
+        let previous = if let Some(parent) = parents.first() {
+            state.files = retained
+                .get(parent)
+                .ok_or_else(|| Error::InvalidInput("missing parent state".into()))?
+                .clone();
+            repo.find_commit(*parent)
+                .map_err(git_error)?
+                .tree()
+                .map_err(git_error)?
+        } else {
+            state.files = BTreeMap::new();
+            repo.empty_tree()
+        };
         let changes = tree_changes(&previous, &tree, &mut cache)?;
         cache.clear_resource_cache();
-        state.commit(&repo, changes, shares.authors(), options, excluded)?;
-        if commit.parent_ids().count() > 1 {
+        let other_parents = merge_parents(&repo, parents, &retained, &tree, &mut cache)?;
+        state.commit(
+            &repo,
+            changes,
+            shares.authors(),
+            options,
+            excluded,
+            &other_parents,
+        )?;
+        if options.walk == crate::Walk::FirstParent && commit.parent_ids().count() > 1 {
             state.warnings.insert("Merge attribution is approximate: first-parent merge diffs credit the merge author and co-authors.".into());
         }
-        previous = tree;
+        // Include the current output state as well as parents still being consumed.
+        peak_retained_states = peak_retained_states.max(retained.len() + 1);
+        for parent in parents {
+            if let Some(count) = history.remaining_children.get_mut(parent) {
+                *count -= 1;
+                if *count == 0 {
+                    retained.remove(parent);
+                }
+            }
+        }
+        retained.insert(*id, std::mem::take(&mut state.files));
     }
-    state.ledger.recount(state.files.values())?;
+    state.files = retained
+        .remove(&head.id)
+        .ok_or_else(|| Error::InvalidInput("missing HEAD state".into()))?;
+    state
+        .ledger
+        .recount(state.files.values().map(|file| &file.state))?;
     let mut directories = directories(&state.files, options.depth)?;
     let authors = authors.finish(options, &mut state.ledger, &mut directories)?;
     Ok(Report {
+        walk: options.walk,
+        peak_retained_states,
         head: head.id.to_string(),
-        commits_analyzed: u64::try_from(chain.len())
+        commits_analyzed: u64::try_from(history.order.len())
             .map_err(|_| Error::InvalidInput("too many commits".into()))?,
         formatting_commits: state.formatting,
         authors,
@@ -76,6 +110,44 @@ pub fn analyze(
         directories,
         warnings: state.warnings.into_iter().collect(),
     })
+}
+
+/// Build other-parent views, including rename sources, without copying file maps.
+fn merge_parents<'a>(
+    repo: &gix::Repository,
+    parents: &[gix::ObjectId],
+    retained: &'a BTreeMap<gix::ObjectId, Files>,
+    tree: &gix::Tree<'_>,
+    cache: &mut gix::diff::blob::Platform,
+) -> Result<Vec<Parent<'a>>, Error> {
+    let mut other_parents = Vec::new();
+    for parent in parents.iter().skip(1) {
+        let files = retained
+            .get(parent)
+            .ok_or_else(|| Error::InvalidInput("missing merge parent state".into()))?;
+        let parent_tree = repo
+            .find_commit(*parent)
+            .map_err(git_error)?
+            .tree()
+            .map_err(git_error)?;
+        let changes = tree_changes(&parent_tree, tree, cache)?;
+        let renames = changes
+            .iter()
+            .filter_map(|change| {
+                change
+                    .source
+                    .as_ref()
+                    .map(|source| (change.path.clone(), source.clone()))
+            })
+            .collect();
+        cache.clear_resource_cache();
+        other_parents.push(Parent {
+            files,
+            changes,
+            renames,
+        });
+    }
+    Ok(other_parents)
 }
 
 /// Construct a raw-object-only cache once, without consulting repository config,
@@ -200,9 +272,35 @@ fn tree_changes(
     Ok(result)
 }
 
+/// Shared scored blob and provenance, copied only when a file changes.
+struct TrackedFile {
+    id: gix::ObjectId,
+    state: FileState,
+}
+/// A tree map shares unchanged file contents across open branches.
+type Files = BTreeMap<String, Arc<TrackedFile>>;
+
+/// Other-parent lookup with rename sources reported by the isolated diff engine.
+struct Parent<'a> {
+    files: &'a Files,
+    changes: Vec<FileChange>,
+    renames: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+impl Parent<'_> {
+    /// Resolve the merge destination in this parent's original tree.
+    fn file(&self, path: &str) -> Option<&Arc<TrackedFile>> {
+        self.files.get(path).or_else(|| {
+            self.renames
+                .get(path.as_bytes())
+                .and_then(|source| std::str::from_utf8(source).ok())
+                .and_then(|source| self.files.get(source))
+        })
+    }
+}
+
 /// State bounded by live content plus transient changes for one commit.
 struct Replay {
-    files: BTreeMap<String, FileState>,
+    files: Files,
     ledger: Ledger,
     warnings: BTreeSet<String>,
     formatting: u64,
@@ -216,9 +314,10 @@ impl Replay {
         authors: &[(credit_core::AuthorId, u32)],
         options: &Options,
         excluded: &dyn Fn(&str) -> bool,
+        parents: &[Parent<'_>],
     ) -> Result<(), Error> {
         let mut staged = Vec::new();
-        let mut live = BTreeSet::new();
+        let mut live = BTreeMap::new();
         let mut formatting = true;
         for change in changes {
             let path = String::from_utf8(change.path).map_err(|_| {
@@ -231,10 +330,9 @@ impl Replay {
                 .map_err(|_| {
                     Error::InvalidInput("non-UTF-8 rename source cannot be reported safely".into())
                 })?;
-            let previous = self
-                .files
-                .remove(source.as_deref().unwrap_or(&path))
-                .unwrap_or_default();
+            let previous = self.files.remove(source.as_deref().unwrap_or(&path));
+            let empty = FileState::default();
+            let previous = previous.as_ref().map_or(&empty, |file| &file.state);
             if excluded(&path) {
                 formatting &= previous
                     .lines
@@ -250,18 +348,34 @@ impl Replay {
                         .all(|line| line.text.trim().is_empty());
                     continue;
                 };
-                live.insert(path.clone());
+                live.insert(path.clone(), id);
                 text
             } else {
                 String::new()
             };
-            let result = apply_change(
-                &previous,
+            let mut result = apply_change(
+                previous,
                 &text,
                 authors,
                 normalization(&path),
                 options.policy,
             )?;
+            if let Some(id) = change.id
+                && let Some(file) = parents
+                    .iter()
+                    .filter_map(|parent| parent.file(&path))
+                    .find(|file| file.id == id)
+            {
+                adopt_parent(&mut result, &file.state);
+            } else {
+                reconcile_parents(
+                    &mut result,
+                    parents
+                        .iter()
+                        .filter_map(|parent| parent.file(&path))
+                        .map(|file| &file.state),
+                );
+            }
             formatting &= result.kind == ChangeKind::Formatting;
             if source.is_some() {
                 formatting = false;
@@ -272,15 +386,72 @@ impl Replay {
             }
             staged.push((path, result));
         }
-        reconcile_moves(&mut staged);
+        let sources = self.parent_move_sources(repo, parents, authors, options, excluded)?;
+        reconcile_merge_moves(&mut staged, &sources);
         for (path, change) in staged {
             self.ledger.add_labor(&change.labor)?;
-            if live.contains(&path) {
-                self.files.insert(path, change.state);
+            if let Some(&id) = live.get(&path) {
+                self.files.insert(
+                    path,
+                    Arc::new(TrackedFile {
+                        id,
+                        state: change.state,
+                    }),
+                );
             }
         }
         self.formatting += u64::from(formatting);
         Ok(())
+    }
+
+    /// Diff other parents only to recover removed blocks, never their labor.
+    fn parent_move_sources(
+        &mut self,
+        repo: &gix::Repository,
+        parents: &[Parent<'_>],
+        authors: &[(credit_core::AuthorId, u32)],
+        options: &Options,
+        excluded: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<Vec<(String, credit_core::Change)>>, Error> {
+        let mut sources = Vec::new();
+        for parent in parents {
+            let mut changes = Vec::new();
+            for change in &parent.changes {
+                let path = std::str::from_utf8(&change.path).map_err(|_| {
+                    Error::InvalidInput(
+                        "non-UTF-8 repository path cannot be reported safely".into(),
+                    )
+                })?;
+                let source = change.source.as_deref().unwrap_or(&change.path);
+                let source = std::str::from_utf8(source).map_err(|_| {
+                    Error::InvalidInput("non-UTF-8 rename source cannot be reported safely".into())
+                })?;
+                let Some(previous) = parent.files.get(source) else {
+                    continue;
+                };
+                if excluded(path) {
+                    continue;
+                }
+                let text = if let Some(id) = change.id {
+                    let Some(text) = self.text(repo, id, path, options.max_file_size)? else {
+                        continue;
+                    };
+                    text
+                } else {
+                    String::new()
+                };
+                let result = apply_change(
+                    &previous.state,
+                    &text,
+                    authors,
+                    normalization(path),
+                    options.policy,
+                )?;
+                changes.push((path.to_owned(), result));
+            }
+            sources.push(changes);
+        }
+        Ok(sources)
     }
 
     /// Check object size before decoding; invalid UTF-8 is scored lossily and warned.
@@ -312,7 +483,7 @@ impl Replay {
 }
 
 /// Aggregate live ownership by the requested number of parent path components.
-fn directories(files: &BTreeMap<String, FileState>, depth: usize) -> Result<Vec<Directory>, Error> {
+fn directories(files: &Files, depth: usize) -> Result<Vec<Directory>, Error> {
     if depth == 0 {
         return Ok(Vec::new());
     }
@@ -320,7 +491,7 @@ fn directories(files: &BTreeMap<String, FileState>, depth: usize) -> Result<Vec<
     for (path, file) in files {
         let parent = path.rsplit_once('/').map_or(".", |(parent, _)| parent);
         let directory = parent.split('/').take(depth).collect::<Vec<_>>().join("/");
-        groups.entry(directory).or_default().push(file);
+        groups.entry(directory).or_default().push(&file.state);
     }
     groups
         .into_iter()

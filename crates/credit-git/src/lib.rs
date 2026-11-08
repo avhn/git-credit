@@ -1,8 +1,6 @@
-//! Offline first-parent repository replay for line-level attribution.
+//! Offline merge-aware repository replay for line-level attribution.
 //!
-//! Only live file attribution is retained. Commit IDs are collected to reverse
-//! the first-parent chain; side branches are not replayed. Merge diffs therefore
-//! credit the merge author and trailers, an explicitly approximate walk.
+//! Parent states share file content and are released after their last child.
 //! ```no_run
 //! let report = credit_git::analyze(std::path::Path::new("."),
 //!     &credit_git::Options::default(), &|_| false)?;
@@ -11,6 +9,7 @@
 //! ```
 #![deny(missing_docs)]
 
+mod history;
 mod identities;
 mod replay;
 
@@ -86,9 +85,30 @@ pub enum GroupBy {
     Email,
 }
 
+/// Reachable history selection for attribution.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Walk {
+    /// Visit every reachable commit once, preserving merge parent provenance.
+    #[default]
+    Full,
+    /// Replay only the first-parent chain, crediting merge diffs to merge authors.
+    FirstParent,
+}
+impl Walk {
+    /// Stable walk identifier used by report consumers.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::FirstParent => "first-parent",
+        }
+    }
+}
+
 /// Analysis policy, independent of CLI serialization and glob implementation.
 #[derive(Debug, Clone)]
 pub struct Options {
+    /// History selection, full by default.
+    pub walk: Walk,
     /// Attribution threshold.
     pub policy: Policy,
     /// Maximum blob size in bytes, default 1 MiB.
@@ -103,6 +123,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            walk: Walk::default(),
             policy: Policy::default(),
             max_file_size: 1_048_576,
             depth: 1,
@@ -135,9 +156,13 @@ pub struct Directory {
 /// Deterministic analysis output. All credit amounts are millionths of a line.
 #[derive(Debug)]
 pub struct Report {
+    /// History selection used for this report.
+    pub walk: Walk,
+    /// Peak number of retained commit tree states during replay.
+    pub peak_retained_states: usize,
     /// Full analyzed HEAD object ID.
     pub head: String,
-    /// Number of visited first-parent commits.
+    /// Number of visited commits in the selected walk.
     pub commits_analyzed: u64,
     /// Commits whose included normalized nonblank content is unchanged.
     pub formatting_commits: u64,

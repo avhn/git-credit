@@ -16,13 +16,16 @@ struct Cli {
 /// Supported offline operations.
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Analyze committed HEAD using the first-parent history chain.
+    /// Analyze committed HEAD using merge-aware history replay.
     Analyze(Analyze),
 }
 /// Analysis inputs and output controls. CLI policy values override configuration.
 #[derive(Debug, clap::Args)]
 #[allow(clippy::struct_excessive_bools)] // Independent clap switches, not mutually exclusive application states.
 struct Analyze {
+    /// Replay only the first-parent chain (legacy merge attribution).
+    #[arg(long)]
+    first_parent: bool,
     /// Repository path (working tree or bare repository).
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -70,7 +73,10 @@ fn main() -> ExitCode {
 fn run(args: &Analyze) -> anyhow::Result<()> {
     let settings = config::Settings::load(args)?;
     if args.verbose > 0 {
-        eprintln!("Analyzing committed HEAD (first-parent, offline)...");
+        eprintln!(
+            "Analyzing committed HEAD ({}, offline)...",
+            settings.options.walk.as_str()
+        );
     }
     let report = credit_git::analyze(&args.path, &settings.options, &|path| {
         settings.excluded.is_match(path)
@@ -81,9 +87,10 @@ fn run(args: &Analyze) -> anyhow::Result<()> {
         }
         if args.verbose > 0 {
             eprintln!(
-                "Analyzed {} commits; {} identities",
+                "Analyzed {} commits; {} identities; peak retained states: {}",
                 report.commits_analyzed,
-                report.authors.len()
+                report.authors.len(),
+                report.peak_retained_states
             );
         }
     }

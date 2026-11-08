@@ -389,9 +389,9 @@ fn exclusions_binary_size_and_json_contract() {
     fixture.write(".git-credit.toml", "max_file_size = 50\n");
     let report = fixture.json(&["--depth", "2"]);
     assert_eq!(report["schema_version"], 1);
-    assert_eq!(report["algorithm_version"], 1);
+    assert_eq!(report["algorithm_version"], 2);
     assert_eq!(report["head"].as_str().unwrap().len(), 40);
-    assert_eq!(report["walk"], "first-parent");
+    assert_eq!(report["walk"], "full");
     assert_eq!(report["units"], "lines");
     assert_eq!(report["policy"]["keep"], 0.7);
     assert_eq!(report["policy"]["max_file_size"], 50);
@@ -417,7 +417,7 @@ fn exclusions_binary_size_and_json_contract() {
     assert!(!output.stdout.contains(&0x1b));
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("OWNERSHIP %"));
-    assert!(text.contains("first-parent"));
+    assert!(text.contains("full"));
 }
 
 #[test]
@@ -586,7 +586,7 @@ fn first_parent_merge_counts_diff_once() {
     fixture.commit("Bob", "bob@example.test", "branch");
     fixture.git(&["checkout", "main"]);
     fixture.git(&["merge", "--no-ff", "branch", "-m", "merge"]);
-    let report = fixture.json(&[]);
+    let report = fixture.json(&["--first-parent"]);
     assert_eq!(report["commits_analyzed"], 2);
     assert_eq!(
         author(&report, "alice@example.test")["ownership_lines"],
@@ -594,4 +594,356 @@ fn first_parent_merge_counts_diff_once() {
     );
     assert_eq!(author(&report, "alice@example.test")["labor"], 2.0);
     assert_eq!(report["warnings"].as_array().unwrap().len(), 1);
+}
+
+/// Sum a report metric to check mass and once-only labor accounting.
+fn total(report: &Value, metric: &str) -> f64 {
+    report["authors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row[metric].as_f64().unwrap())
+        .sum()
+}
+
+#[test]
+fn full_merge_preserves_branch_credit_and_config_selects_legacy() {
+    let fixture = Fixture::new();
+    fixture.commit("Alice", "alice@example.test", "empty root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write(
+        "feature.rs",
+        "Bob's contribution
+",
+    );
+    fixture.commit("Bob", "bob@example.test", "feature");
+    fixture.git(&["checkout", "main"]);
+    fixture.git(&["merge", "--no-ff", "feature", "-m", "merge"]);
+    let full = fixture.json(&[]);
+    assert_eq!(full["commits_analyzed"], 3);
+    assert_eq!(full["authors"].as_array().unwrap().len(), 1);
+    assert_eq!(author(&full, "bob@example.test")["ownership_lines"], 1.0);
+    assert_eq!(author(&full, "bob@example.test")["labor"], 1.0);
+    assert_eq!(full["warnings"].as_array().unwrap(), &Vec::<Value>::new());
+    fixture.write(
+        ".git-credit.toml",
+        "walk = 'first-parent'
+",
+    );
+    assert_eq!(fixture.json(&[]), fixture.json(&["--first-parent"]));
+    fixture.write(
+        ".git-credit.toml",
+        "walk = 'invalid'
+",
+    );
+    let invalid = fixture.cli(&["--json"]);
+    assert!(!invalid.status.success());
+    assert_eq!(invalid.stdout, Vec::<u8>::new());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("walk must be"));
+}
+
+#[test]
+fn linear_history_is_identical_in_both_walks() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "a.rs", "one
+",
+    );
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.write(
+        "a.rs", "one
+two
+",
+    );
+    fixture.commit("Bob", "bob@example.test", "second");
+    let mut full = fixture.json(&[]);
+    full["walk"] = Value::from("first-parent");
+    assert_eq!(full, fixture.json(&["--first-parent"]));
+}
+
+#[test]
+fn mixed_merge_refunds_parent_lines_and_keeps_resolution_work() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "a.rs", "root
+",
+    );
+    fixture.commit("Root", "root@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write(
+        "a.rs",
+        "bob unique content
+",
+    );
+    fixture.commit("Bob", "bob@example.test", "feature");
+    fixture.git(&["checkout", "main"]);
+    fixture.write(
+        "a.rs",
+        "carol distinct content
+",
+    );
+    fixture.commit("Carol", "carol@example.test", "main");
+    // Construct the resolved merge tree directly, with real parent links. This
+    // avoids invoking a conflict driver or depending on Git's conflict markers.
+    fixture.write(
+        "a.rs",
+        "carol distinct content
+bob unique content
+resolution
+",
+    );
+    fixture.git(&["add", "-A"]);
+    let tree = fixture.git(&["write-tree"]);
+    let tree = String::from_utf8(tree.stdout).unwrap();
+    let merge = fixture.git(&[
+        "commit-tree",
+        tree.trim(),
+        "-p",
+        "HEAD",
+        "-p",
+        "feature",
+        "-m",
+        "resolve conflict",
+    ]);
+    let merge = String::from_utf8(merge.stdout).unwrap();
+    fixture.git(&["reset", "--hard", merge.trim()]);
+    let report = fixture.json(&[]);
+    assert_eq!(
+        author(&report, "alice@example.test")["ownership_lines"],
+        1.0
+    );
+    assert_eq!(author(&report, "alice@example.test")["labor"], 1.0);
+    assert_eq!(author(&report, "bob@example.test")["ownership_lines"], 1.0);
+    assert_eq!(total(&report, "ownership_lines"), 3.0);
+    assert_eq!(total(&report, "labor"), 4.0);
+}
+
+#[test]
+fn octopus_merge_visits_shared_ancestors_once() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "root.rs", "root
+",
+    );
+    fixture.commit("Root", "root@example.test", "root");
+    for (branch, name) in [("bob", "Bob"), ("carol", "Carol")] {
+        fixture.git(&["checkout", "-b", branch, "main"]);
+        fixture.write(
+            &format!("{branch}.rs"),
+            format!(
+                "{name}
+"
+            ),
+        );
+        fixture.commit(name, &format!("{branch}@example.test"), branch);
+    }
+    fixture.git(&["checkout", "main"]);
+    fixture.write(
+        "main.rs", "main
+",
+    );
+    fixture.commit("Main", "main@example.test", "main");
+    fixture.git(&["merge", "--no-ff", "bob", "carol", "-m", "octopus"]);
+    let report = fixture.json(&[]);
+    assert_eq!(report["commits_analyzed"], 5);
+    assert_eq!(total(&report, "labor"), 4.0);
+    assert_eq!(total(&report, "ownership_lines"), 4.0);
+    assert_eq!(author(&report, "bob@example.test")["ownership_lines"], 1.0);
+    assert_eq!(
+        author(&report, "carol@example.test")["ownership_lines"],
+        1.0
+    );
+}
+
+#[test]
+fn criss_cross_merges_do_not_replay_shared_labor() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "root.rs", "root
+",
+    );
+    fixture.commit("Root", "root@example.test", "root");
+    fixture.git(&["checkout", "-b", "bob"]);
+    fixture.write(
+        "bob.rs", "bob
+",
+    );
+    fixture.commit("Bob", "bob@example.test", "bob");
+    fixture.git(&["branch", "bob-original"]);
+    fixture.git(&["checkout", "main"]);
+    fixture.write(
+        "carol.rs", "carol
+",
+    );
+    fixture.commit("Carol", "carol@example.test", "carol");
+    fixture.git(&["branch", "carol-original"]);
+    fixture.git(&["merge", "--no-ff", "bob-original", "-m", "first merge"]);
+    fixture.git(&["checkout", "bob"]);
+    fixture.git(&["merge", "--no-ff", "carol-original", "-m", "second merge"]);
+    fixture.git(&["checkout", "main"]);
+    fixture.git(&["merge", "--no-ff", "bob", "-m", "join"]);
+    let report = fixture.json(&[]);
+    assert_eq!(report["commits_analyzed"], 6);
+    assert_eq!(total(&report, "labor"), 3.0);
+    assert_eq!(total(&report, "ownership_lines"), 3.0);
+    assert_eq!(report, fixture.json(&[]));
+}
+
+#[test]
+fn merge_adopts_renamed_parent_blob_and_keeps_deletions() {
+    let fixture = Fixture::new();
+    fixture.write("deleted.rs", "delete me\n");
+    fixture.commit("Root", "root@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write("old.rs", "branch content\n");
+    fixture.commit("Bob", "bob@example.test", "feature");
+    fixture.git(&["checkout", "main"]);
+    fixture.write("new.rs", "branch content\n");
+    fixture.git(&["rm", "deleted.rs"]);
+    fixture.git(&["add", "-A"]);
+    let tree = fixture.git(&["write-tree"]);
+    let tree = String::from_utf8(tree.stdout).unwrap();
+    let merge = fixture.git(&[
+        "commit-tree",
+        tree.trim(),
+        "-p",
+        "HEAD",
+        "-p",
+        "feature",
+        "-m",
+        "renamed merge",
+    ]);
+    let merge = String::from_utf8(merge.stdout).unwrap();
+    fixture.git(&["reset", "--hard", merge.trim()]);
+    let report = fixture.json(&[]);
+    assert_eq!(author(&report, "bob@example.test")["ownership_lines"], 1.0);
+    assert_eq!(total(&report, "ownership_lines"), 1.0);
+    assert_eq!(total(&report, "labor"), 2.0);
+}
+
+#[test]
+fn retained_states_follow_open_branches_not_history_length() {
+    let fixture = Fixture::new();
+    fixture.write("a.rs", "root\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    for n in 0..20 {
+        fixture.commit("Alice", "alice@example.test", &format!("empty {n}"));
+    }
+    let report = credit_git::analyze(fixture.dir.path(), &credit_git::Options::default(), &|_| {
+        false
+    })
+    .unwrap();
+    assert_eq!(report.commits_analyzed, 21);
+    assert_eq!(report.peak_retained_states, 2);
+}
+
+#[test]
+fn exact_parent_adoption_preserves_formatting_classification() {
+    let fixture = Fixture::new();
+    fixture.write("a.rs", "code\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write("a.rs", "  code\n\n");
+    fixture.commit("Bob", "bob@example.test", "format");
+    fixture.git(&["checkout", "main"]);
+    fixture.git(&["merge", "--no-ff", "feature", "-m", "merge"]);
+    let report = fixture.json(&[]);
+    assert_eq!(report["formatting_commits"], 2);
+    assert_eq!(total(&report, "labor"), 1.0);
+    assert_eq!(
+        author(&report, "alice@example.test")["ownership_lines"],
+        1.0
+    );
+}
+
+/// Commit a manually resolved tree with both parents and a distinct merge author.
+fn resolved_merge(fixture: &Fixture) {
+    fixture.git(&["add", "-A"]);
+    let tree = fixture.git(&["write-tree"]);
+    let tree = String::from_utf8(tree.stdout).unwrap();
+    let merge = git(
+        fixture.dir.path(),
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            "HEAD",
+            "-p",
+            "feature",
+            "-m",
+            "resolved merge",
+        ],
+        "Merger",
+        "merger@example.test",
+    );
+    let merge = String::from_utf8(merge.stdout).unwrap();
+    fixture.git(&["reset", "--hard", merge.trim()]);
+}
+
+#[test]
+fn exact_parent_adoption_keeps_first_parent_move_sources() {
+    let fixture = Fixture::new();
+    fixture.write("a.rs", "original one\noriginal two\noriginal three\nkeep\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write("a.rs", "keep\n");
+    fixture.commit("Bob", "bob@example.test", "remove block");
+    fixture.git(&["checkout", "main"]);
+    fixture.write("a.rs", "keep\n");
+    fixture.write("b.rs", "original one\noriginal two\noriginal three\n");
+    resolved_merge(&fixture);
+    let report = fixture.json(&[]);
+    assert_eq!(
+        author(&report, "alice@example.test")["ownership_lines"],
+        4.0
+    );
+    assert_eq!(total(&report, "labor"), 4.0);
+    assert_eq!(report["authors"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn merge_moves_can_use_sources_absent_from_first_parent() {
+    let fixture = Fixture::new();
+    fixture.write("a.rs", "keep\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.write("a.rs", "original one\noriginal two\noriginal three\nkeep\n");
+    fixture.commit("Bob", "bob@example.test", "add block");
+    fixture.git(&["checkout", "main"]);
+    fixture.write("b.rs", "original one\noriginal two\noriginal three\n");
+    resolved_merge(&fixture);
+    let report = fixture.json(&[]);
+    assert_eq!(
+        author(&report, "alice@example.test")["ownership_lines"],
+        1.0
+    );
+    assert_eq!(author(&report, "bob@example.test")["ownership_lines"], 3.0);
+    assert_eq!(total(&report, "labor"), 4.0);
+    assert_eq!(report["authors"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn overlapping_parent_move_sources_cannot_fund_two_copies() {
+    let fixture = Fixture::new();
+    fixture.write("a.rs", "original one\noriginal two\noriginal three\nkeep\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.git(&["checkout", "-b", "feature"]);
+    fixture.commit("Bob", "bob@example.test", "empty branch");
+    fixture.git(&["checkout", "main"]);
+    fixture.write("a.rs", "keep\n");
+    for path in ["b.rs", "c.rs"] {
+        fixture.write(path, "original one\noriginal two\noriginal three\n");
+    }
+    resolved_merge(&fixture);
+    let report = fixture.json(&[]);
+    assert_eq!(
+        author(&report, "alice@example.test")["ownership_lines"],
+        4.0
+    );
+    assert_eq!(
+        author(&report, "merger@example.test")["ownership_lines"],
+        3.0
+    );
+    assert_eq!(author(&report, "merger@example.test")["labor"], 3.0);
+    assert_eq!(total(&report, "ownership_lines"), 7.0);
 }

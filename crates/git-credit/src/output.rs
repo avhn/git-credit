@@ -141,7 +141,7 @@ pub(crate) fn json(report: &Report, settings: &Settings) -> anyhow::Result<Strin
         schema_version: 1,
         algorithm_version: credit_core::ALGORITHM_VERSION,
         head: &report.head,
-        walk: "first-parent",
+        walk: report.walk.as_str(),
         units: "lines",
         policy: PolicyRow {
             keep: f64::from(settings.options.policy.keep_per_mille) / 1000.0,
@@ -182,9 +182,10 @@ pub(crate) fn table(report: &Report) -> String {
     }
     let _ = write!(
         text,
-        "\nHEAD {} | {} commits | first-parent | algorithm {}\nProvenance metrics do not measure a person's value.",
+        "\nHEAD {} | {} commits | {} | algorithm {}\nProvenance metrics do not measure a person's value.",
         report.head.get(..12).unwrap_or(&report.head),
         report.commits_analyzed,
+        report.walk.as_str(),
         credit_core::ALGORITHM_VERSION
     );
     text
