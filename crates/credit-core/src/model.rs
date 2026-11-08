@@ -180,6 +180,9 @@ impl Ledger {
         let mut ownership = BTreeMap::new();
         for file in files {
             for line in &file.lines {
+                if line.text.trim().is_empty() {
+                    continue;
+                }
                 for &(id, share) in line.owner.authors() {
                     add_total(&mut ownership, id, u64::from(share))?;
                 }

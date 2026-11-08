@@ -13,7 +13,8 @@
 //! every result is a deterministic function of its inputs. Repository access
 //! lives in the `credit-git` crate.
 //!
-//! Ownership and labor use millionths of a physical line. Similarity is measured
+//! Ownership and labor use millionths of a nonblank line; blank lines have zero
+//! weight but remain in state for alignment. Similarity is measured
 //! over Unicode scalar values, not tokens or grapheme clusters. The caller must
 //! reconcile same-commit moves before accumulating labor and recompute ownership
 //! from live files after deletions.

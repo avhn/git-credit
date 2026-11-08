@@ -81,12 +81,36 @@ struct Source {
 
 /// Match maximal consecutive runs and subtract exactly their original labor shares.
 fn match_source(change: &mut Change, source: &mut Source) -> usize {
+    if source.lines.len() < 3 || change.added.len() < 3 {
+        return 0;
+    }
+    let mut starts = std::collections::BTreeMap::new();
+    for (position, triple) in source.lines.windows(3).enumerate() {
+        if let [a, b, c] = triple {
+            starts
+                .entry((a.0.as_str(), b.0.as_str(), c.0.as_str()))
+                .or_insert_with(Vec::new)
+                .push(position);
+        }
+    }
     let mut moved = 0;
     for start in 0..change.state.lines.len() {
         if !change.added.contains_key(&start) {
             continue;
         }
-        for old_start in 0..source.lines.len() {
+        let Some([a, b, c, ..]) = change.state.lines.get(start..) else {
+            continue;
+        };
+        let key = (
+            change.mode.normalize(&a.text),
+            change.mode.normalize(&b.text),
+            change.mode.normalize(&c.text),
+        );
+        let Some(candidates) = starts.get(&key) else {
+            continue;
+        };
+        // Candidate lists retain old positions in order, preserving tie-breaking.
+        for &old_start in candidates {
             let length = (old_start..source.lines.len())
                 .zip(start..change.state.lines.len())
                 .take_while(|&(old, new)| {

@@ -217,6 +217,54 @@ fn pairing_cap_is_visible_and_rewrites_hunk() {
 }
 
 #[test]
+fn mixed_blank_and_meaningful_edits_align_only_meaningful_lines() {
+    let original = edit(&FileState::default(), "alpha\n\n\n\nbeta\n", A);
+    let changed = edit(&original.state, "\n\n\nalpha\nbeta\ngamma\n", B);
+    assert_eq!(changed.kind, ChangeKind::Meaningful);
+    assert_eq!(changed.labor[&B], 1_000_000);
+    assert_eq!(changed.state.lines.len(), 6);
+    let mut ledger = Ledger::default();
+    ledger.recount([&changed.state]).unwrap();
+    assert_eq!(ledger.ownership, [(A, 2_000_000), (B, 1_000_000)].into());
+}
+
+#[test]
+fn move_candidates_keep_physical_blank_positions() {
+    let original = edit(&FileState::default(), "one\n\nthree\n", A);
+    let mut changes = vec![
+        ("old".into(), edit(&original.state, "", B)),
+        (
+            "new".into(),
+            edit(&FileState::default(), "\none\n\nthree\n", B),
+        ),
+    ];
+    assert_eq!(reconcile_moves(&mut changes), 3);
+    assert_eq!(changes[1].1.labor[&B], 0);
+    let mut ledger = Ledger::default();
+    ledger.recount([&changes[1].1.state]).unwrap();
+    assert_eq!(ledger.ownership, [(A, 2_000_000)].into());
+    let mut compressed = vec![
+        ("old".into(), edit(&original.state, "", B)),
+        ("new".into(), edit(&FileState::default(), "one\nthree\n", B)),
+    ];
+    assert_eq!(reconcile_moves(&mut compressed), 0);
+    assert_eq!(compressed[1].1.labor[&B], 2_000_000);
+}
+
+#[test]
+fn blank_runs_cannot_transfer_meaningful_ownership() {
+    let original = edit(&FileState::default(), "a\n\n\n\n\nb", A);
+    let changed = edit(&original.state, "\n\n\n\n\na\nb", B);
+    assert_eq!(changed.kind, ChangeKind::Formatting);
+    assert_eq!(changed.labor.values().sum::<u64>(), 0);
+    let mut ledger = Ledger::default();
+    ledger.recount([&changed.state]).unwrap();
+    assert_eq!(ledger.ownership, [(A, 2_000_000)].into());
+    let inserted = edit(&original.state, "a\n\n\n\n\nb\nnew\n\n", B);
+    assert_eq!(inserted.labor[&B], 1_000_000);
+}
+
+#[test]
 fn blank_empty_and_unicode_lines_have_defined_semantics() {
     assert_eq!(
         edit(&FileState::default(), "", A).state.lines,
@@ -224,7 +272,20 @@ fn blank_empty_and_unicode_lines_have_defined_semantics() {
     );
     let blank = edit(&FileState::default(), "\n", A);
     assert_eq!(blank.state.lines.len(), 1);
-    assert_eq!(blank.labor[&A], 1_000_000);
+    assert_eq!(blank.labor.values().sum::<u64>(), 0);
+    assert_eq!(blank.kind, ChangeKind::Formatting);
+    let mut ledger = Ledger::default();
+    ledger.recount([&blank.state]).unwrap();
+    assert!(ledger.ownership.is_empty());
+    let original = edit(&FileState::default(), "hello\nworld", A);
+    let padded = edit(&original.state, "\nhello\n \nworld\n\n", B);
+    assert_eq!(padded.kind, ChangeKind::Formatting);
+    assert_eq!(padded.labor.values().sum::<u64>(), 0);
+    ledger.recount([&padded.state]).unwrap();
+    assert_eq!(ledger.ownership, [(A, 2_000_000)].into());
+    let unpadded = edit(&padded.state, "hello\nworld", B);
+    assert_eq!(unpadded.kind, ChangeKind::Formatting);
+    assert_eq!(unpadded.labor.values().sum::<u64>(), 0);
     assert_eq!(edit(&blank.state, " \r\n", B).kind, ChangeKind::Formatting);
     let unicode = edit(&FileState::default(), "αβγδε", A);
     assert_eq!(edit(&unicode.state, "αβγδX", B).labor[&B], 200_000);
