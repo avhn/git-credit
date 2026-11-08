@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fast local gate: formatting and text policy. Clippy and tests run in CI and via `cargo lint` / `cargo test`.
+set -euo pipefail
+cargo fmt --all --check
+"$(git rev-parse --show-toplevel)/tools/check-text.sh"
