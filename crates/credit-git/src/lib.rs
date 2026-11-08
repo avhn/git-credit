@@ -1,4 +1,4 @@
-//! Offline merge-aware repository replay for line-level attribution.
+//! Offline merge-aware repository replay for token or line attribution.
 //!
 //! Parent states share file content and are released after their last child.
 //! ```no_run
@@ -12,6 +12,7 @@
 mod history;
 mod identities;
 mod replay;
+mod scoring;
 
 pub use credit_core::ALGORITHM_VERSION;
 use credit_core::{AuthorId, Policy};
@@ -104,9 +105,32 @@ impl Walk {
     }
 }
 
+/// Attribution unit used during replay; reports always use line equivalents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Granularity {
+    /// Retain the legacy whole-line similarity rules.
+    Line,
+    /// Preserve individual canonical token provenance.
+    #[default]
+    Token,
+}
+impl Granularity {
+    /// Stable configuration and JSON identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Line => "line",
+            Self::Token => "token",
+        }
+    }
+}
+
 /// Analysis policy, independent of CLI serialization and glob implementation.
 #[derive(Debug, Clone)]
 pub struct Options {
+    /// Attribution units, token by default.
+    pub granularity: Granularity,
+    /// Preserve bulk-renamed token owners and charge one line per mapping/file.
+    pub bulk_discount: bool,
     /// History selection, full by default.
     pub walk: Walk,
     /// Attribution threshold.
@@ -123,6 +147,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            granularity: Granularity::default(),
+            bulk_discount: true,
             walk: Walk::default(),
             policy: Policy::default(),
             max_file_size: 1_048_576,
@@ -156,6 +182,10 @@ pub struct Directory {
 /// Deterministic analysis output. All credit amounts are millionths of a line.
 #[derive(Debug)]
 pub struct Report {
+    /// Attribution units used for this report.
+    pub granularity: Granularity,
+    /// Commits with at least one discounted bulk mapping.
+    pub bulk_edit_commits: u64,
     /// History selection used for this report.
     pub walk: Walk,
     /// Peak number of retained commit tree states during replay.

@@ -23,6 +23,12 @@ enum Command {
 #[derive(Debug, clap::Args)]
 #[allow(clippy::struct_excessive_bools)] // Independent clap switches, not mutually exclusive application states.
 struct Analyze {
+    /// Attribution granularity [default: token]; reports remain in line units.
+    #[arg(long, value_parser = ["line", "token"])]
+    granularity: Option<String>,
+    /// Disable bulk-rename ownership preservation and labor discounts.
+    #[arg(long)]
+    no_bulk_discount: bool,
     /// Replay only the first-parent chain (legacy merge attribution).
     #[arg(long)]
     first_parent: bool,
@@ -35,7 +41,7 @@ struct Analyze {
     /// Group by canonical email instead of case-insensitive resolved display name.
     #[arg(long)]
     by_email: bool,
-    /// Similarity required to keep ownership, 0.0..=1.0 [default: 0.70].
+    /// Line-mode similarity required to keep ownership, 0.0..=1.0 [default: 0.70].
     #[arg(long, value_parser = config::parse_keep)]
     keep: Option<u32>,
     /// Exclude a repository-relative glob; repeat to replace config exclusions.

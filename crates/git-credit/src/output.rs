@@ -47,6 +47,7 @@ struct DirectoryRow<'a> {
 /// Effective scoring policy, including built-in exclusions.
 #[derive(Serialize)]
 struct PolicyRow<'a> {
+    bulk_discount: bool,
     keep: f64,
     group_by: &'static str,
     exclude: &'a [String],
@@ -60,6 +61,8 @@ struct JsonReport<'a> {
     head: &'a str,
     walk: &'static str,
     units: &'static str,
+    granularity: &'static str,
+    bulk_edit_commits: u64,
     policy: PolicyRow<'a>,
     commits_analyzed: u64,
     formatting_commits: u64,
@@ -143,7 +146,11 @@ pub(crate) fn json(report: &Report, settings: &Settings) -> anyhow::Result<Strin
         head: &report.head,
         walk: report.walk.as_str(),
         units: "lines",
+        granularity: report.granularity.as_str(),
+        bulk_edit_commits: report.bulk_edit_commits,
         policy: PolicyRow {
+            bulk_discount: settings.options.bulk_discount
+                && report.granularity == credit_git::Granularity::Token,
             keep: f64::from(settings.options.policy.keep_per_mille) / 1000.0,
             exclude: &settings.patterns,
             max_file_size: settings.options.max_file_size,
@@ -182,10 +189,11 @@ pub(crate) fn table(report: &Report) -> String {
     }
     let _ = write!(
         text,
-        "\nHEAD {} | {} commits | {} | algorithm {}\nProvenance metrics do not measure a person's value.",
+        "\nHEAD {} | {} commits | {} | {} | algorithm {}\nProvenance metrics do not measure a person's value.",
         report.head.get(..12).unwrap_or(&report.head),
         report.commits_analyzed,
         report.walk.as_str(),
+        report.granularity.as_str(),
         credit_core::ALGORITHM_VERSION
     );
     text

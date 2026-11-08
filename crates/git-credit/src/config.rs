@@ -29,6 +29,8 @@ const BUILT_INS: &[&str] = &[
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    granularity: Option<String>,
+    bulk_discount: Option<bool>,
     walk: Option<String>,
     keep: Option<f64>,
     #[serde(default)]
@@ -53,6 +55,19 @@ impl Settings {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
             Err(e) => return Err(e).context("cannot read .git-credit.toml"),
         };
+        let configured_granularity = match config.granularity.as_deref().unwrap_or("token") {
+            "line" => credit_git::Granularity::Line,
+            "token" => credit_git::Granularity::Token,
+            _ => bail!("granularity must be 'line' or 'token'"),
+        };
+        let granularity = match args.granularity.as_deref() {
+            Some("line") => credit_git::Granularity::Line,
+            Some("token") => credit_git::Granularity::Token,
+            _ => configured_granularity,
+        };
+        if args.keep.is_some() && granularity != credit_git::Granularity::Line {
+            bail!("--keep applies only to --granularity line");
+        }
         let keep = args
             .keep
             .map_or_else(
@@ -100,6 +115,8 @@ impl Settings {
         }
         Ok(Self {
             options: credit_git::Options {
+                granularity,
+                bulk_discount: !args.no_bulk_discount && config.bulk_discount.unwrap_or(true),
                 walk: if args.first_parent {
                     credit_git::Walk::FirstParent
                 } else {

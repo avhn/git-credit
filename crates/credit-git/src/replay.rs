@@ -1,10 +1,8 @@
 //! Merge-aware object replay and live-tree aggregation.
 
-use crate::{Directory, Error, Options, Report, git_error, identities::Authors, normalization};
-use credit_core::{
-    ChangeKind, FileState, Ledger, adopt_parent, apply_change, reconcile_merge_moves,
-    reconcile_parents,
-};
+use crate::scoring::{self, Change, State};
+use crate::{Directory, Error, Options, Report, git_error, identities::Authors};
+use credit_core::{ChangeKind, Ledger};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -43,6 +41,8 @@ pub fn analyze(
     let mut cache = raw_diff_cache(repo.object_hash(), options.max_file_size);
     let mut retained: BTreeMap<gix::ObjectId, Files> = BTreeMap::new();
     let mut peak_retained_states = 0;
+    let mut bulk_edit_commits = 0;
+    let mut bulk_examples = Vec::new();
     for id in &history.order {
         let commit = repo.find_commit(*id).map_err(git_error)?;
         let shares = authors.commit(&commit, options)?;
@@ -67,14 +67,19 @@ pub fn analyze(
         let changes = tree_changes(&previous, &tree, &mut cache)?;
         cache.clear_resource_cache();
         let other_parents = merge_parents(&repo, parents, &retained, &tree, &mut cache)?;
-        state.commit(
+        if state.commit(
             &repo,
             changes,
             shares.authors(),
             options,
             excluded,
             &other_parents,
-        )?;
+        )? {
+            bulk_edit_commits += 1;
+            if bulk_examples.len() < 5 {
+                bulk_examples.push(id.to_string());
+            }
+        }
         if options.walk == crate::Walk::FirstParent && commit.parent_ids().count() > 1 {
             state.warnings.insert("Merge attribution is approximate: first-parent merge diffs credit the merge author and co-authors.".into());
         }
@@ -93,12 +98,18 @@ pub fn analyze(
     state.files = retained
         .remove(&head.id)
         .ok_or_else(|| Error::InvalidInput("missing HEAD state".into()))?;
-    state
-        .ledger
-        .recount(state.files.values().map(|file| &file.state))?;
+    state.ledger.ownership = scoring::ownership(state.files.values().map(|file| &file.state))?;
+    if !bulk_examples.is_empty() {
+        state.warnings.insert(format!(
+            "Bulk edits discounted in {bulk_edit_commits} commits; examples: {}",
+            bulk_examples.join(", ")
+        ));
+    }
     let mut directories = directories(&state.files, options.depth)?;
     let authors = authors.finish(options, &mut state.ledger, &mut directories)?;
     Ok(Report {
+        granularity: options.granularity,
+        bulk_edit_commits,
         walk: options.walk,
         peak_retained_states,
         head: head.id.to_string(),
@@ -275,7 +286,7 @@ fn tree_changes(
 /// Shared scored blob and provenance, copied only when a file changes.
 struct TrackedFile {
     id: gix::ObjectId,
-    state: FileState,
+    state: State,
 }
 /// A tree map shares unchanged file contents across open branches.
 type Files = BTreeMap<String, Arc<TrackedFile>>;
@@ -315,7 +326,7 @@ impl Replay {
         options: &Options,
         excluded: &dyn Fn(&str) -> bool,
         parents: &[Parent<'_>],
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let mut staged = Vec::new();
         let mut live = BTreeMap::new();
         let mut formatting = true;
@@ -331,21 +342,15 @@ impl Replay {
                     Error::InvalidInput("non-UTF-8 rename source cannot be reported safely".into())
                 })?;
             let previous = self.files.remove(source.as_deref().unwrap_or(&path));
-            let empty = FileState::default();
+            let empty = State::default();
             let previous = previous.as_ref().map_or(&empty, |file| &file.state);
             if excluded(&path) {
-                formatting &= previous
-                    .lines
-                    .iter()
-                    .all(|line| line.text.trim().is_empty());
+                formatting &= previous.is_empty();
                 continue;
             }
             let text = if let Some(id) = change.id {
                 let Some(text) = self.text(repo, id, &path, options.max_file_size)? else {
-                    formatting &= previous
-                        .lines
-                        .iter()
-                        .all(|line| line.text.trim().is_empty());
+                    formatting &= previous.is_empty();
                     continue;
                 };
                 live.insert(path.clone(), id);
@@ -353,55 +358,43 @@ impl Replay {
             } else {
                 String::new()
             };
-            let mut result = apply_change(
-                previous,
-                &text,
-                authors,
-                normalization(&path),
-                options.policy,
-            )?;
+            let mut result = Change::apply(previous, &text, authors, &path, options)?;
             if let Some(id) = change.id
                 && let Some(file) = parents
                     .iter()
                     .filter_map(|parent| parent.file(&path))
                     .find(|file| file.id == id)
             {
-                adopt_parent(&mut result, &file.state);
+                result.adopt(&file.state);
             } else {
-                reconcile_parents(
-                    &mut result,
+                result.parents(
                     parents
                         .iter()
                         .filter_map(|parent| parent.file(&path))
                         .map(|file| &file.state),
                 );
             }
-            formatting &= result.kind == ChangeKind::Formatting;
+            formatting &= result.kind() == ChangeKind::Formatting;
             if source.is_some() {
                 formatting = false;
             }
-            if result.pairing_capped {
+            if result.pairing_capped() {
                 self.warnings
                     .insert(format!("Similarity pairing capped: {path}"));
             }
             staged.push((path, result));
         }
         let sources = self.parent_move_sources(repo, parents, authors, options, excluded)?;
-        reconcile_merge_moves(&mut staged, &sources);
+        let bulk = scoring::reconcile(&mut staged, sources, options.bulk_discount);
         for (path, change) in staged {
-            self.ledger.add_labor(&change.labor)?;
+            let (state, labor) = change.finish()?;
+            self.ledger.add_labor(&labor)?;
             if let Some(&id) = live.get(&path) {
-                self.files.insert(
-                    path,
-                    Arc::new(TrackedFile {
-                        id,
-                        state: change.state,
-                    }),
-                );
+                self.files.insert(path, Arc::new(TrackedFile { id, state }));
             }
         }
         self.formatting += u64::from(formatting);
-        Ok(())
+        Ok(bulk)
     }
 
     /// Diff other parents only to recover removed blocks, never their labor.
@@ -412,7 +405,7 @@ impl Replay {
         authors: &[(credit_core::AuthorId, u32)],
         options: &Options,
         excluded: &dyn Fn(&str) -> bool,
-    ) -> Result<Vec<Vec<(String, credit_core::Change)>>, Error> {
+    ) -> Result<Vec<Vec<(String, Change)>>, Error> {
         let mut sources = Vec::new();
         for parent in parents {
             let mut changes = Vec::new();
@@ -440,13 +433,7 @@ impl Replay {
                 } else {
                     String::new()
                 };
-                let result = apply_change(
-                    &previous.state,
-                    &text,
-                    authors,
-                    normalization(path),
-                    options.policy,
-                )?;
+                let result = Change::apply(&previous.state, &text, authors, path, options)?;
                 changes.push((path.to_owned(), result));
             }
             sources.push(changes);
@@ -487,7 +474,7 @@ fn directories(files: &Files, depth: usize) -> Result<Vec<Directory>, Error> {
     if depth == 0 {
         return Ok(Vec::new());
     }
-    let mut groups: BTreeMap<String, Vec<&FileState>> = BTreeMap::new();
+    let mut groups: BTreeMap<String, Vec<&State>> = BTreeMap::new();
     for (path, file) in files {
         let parent = path.rsplit_once('/').map_or(".", |(parent, _)| parent);
         let directory = parent.split('/').take(depth).collect::<Vec<_>>().join("/");
@@ -496,17 +483,15 @@ fn directories(files: &Files, depth: usize) -> Result<Vec<Directory>, Error> {
     groups
         .into_iter()
         .map(|(path, files)| {
-            let mut ledger = Ledger::default();
-            ledger.recount(files)?;
-            let total = ledger
-                .ownership
+            let ownership = scoring::ownership(files.into_iter())?;
+            let total = ownership
                 .values()
                 .try_fold(0_u64, |sum, value| sum.checked_add(*value))
                 .ok_or(credit_core::Error::Overflow)?;
             Ok(Directory {
                 path,
                 total,
-                authors: ledger.ownership,
+                authors: ownership,
             })
         })
         .collect()
