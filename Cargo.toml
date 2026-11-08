@@ -12,6 +12,7 @@ homepage = "https://github.com/avhn/git-credit"
 authors = ["Mert Dede <doganmertdede@gmail.com>"]
 
 [workspace.dependencies]
+credit-badge = { path = "crates/credit-badge", version = "0.1.0" }
 credit-core = { path = "crates/credit-core", version = "0.1.0" }
 credit-git = { path = "crates/credit-git", version = "0.1.0" }
 clap = { version = "4.6", features = ["derive"] }
