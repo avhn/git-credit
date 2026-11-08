@@ -9,9 +9,9 @@ wrote and how much work they put in, without letting a reformat, a renamed varia
 or a one-character fix take the credit away from the original author.
 
 > **Status: line-level analysis available.** `analyze` reads committed HEAD and
-> reports ownership and labor using a first-parent walk. Merge attribution is
-> approximate; token-level and full-graph analysis are planned. Nothing here is
-> released yet. These metrics describe provenance, not a person's value.
+> reports ownership and labor using merge-aware full-history replay. Branch authors
+> keep credit through merges; token-level analysis is planned. These metrics
+> describe provenance, not a person's value.
 
 ## Why
 
@@ -37,6 +37,8 @@ Attribution rules:
   with its author; the editor gets labor for the change, not ownership of the line.
   The similarity threshold is configurable. Later versions attribute individual tokens.
 - **Moved and renamed code keeps its author.**
+- **Merges preserve branch provenance.** Each reachable commit contributes labor
+  once; inherited parent content does not earn the merge author new labor.
 - **Identities merge** through `.mailmap`, and `Co-authored-by` trailers split credit.
 - **Noise is excluded:** lockfiles, generated and vendored code, binaries and
   configurable paths.
@@ -62,14 +64,17 @@ Only committed content is scored. Blank lines have zero weight. Shallow clones
 fail with a `git fetch --unshallow` hint; analysis never fetches or runs hooks.
 Bare repositories are supported. Symlinks, submodules, binaries and files over
 1 MiB are skipped; the file-size limit is configurable. This build supports
-SHA-1 repositories. New branch content introduced by merges is credited to the
-merge author and co-authors unless existing first-parent provenance matches it.
+SHA-1 repositories. Use `--first-parent` for the legacy chain-only analysis, which
+credits new branch content in merge diffs to the merge author and co-authors.
+Full mode matches exact blobs and normalized inserted or rewritten lines from
+merge parents; unmatched lines are merge-resolution work.
 
 ### Configuration
 
 Optional `.git-credit.toml` at the repository root:
 
 ```toml
+walk = "full" # Use "first-parent" for legacy merge attribution.
 keep = 0.70
 group_by = "name" # Use "email" to keep different addresses separate.
 exclude = ["generated/**", "fixtures/**"]
@@ -77,7 +82,7 @@ opt_out = ["private@example.test"]
 max_file_size = 1048576
 ```
 
-Explicit `--keep` overrides config. Repeated `--exclude` flags replace config
+Explicit `--keep` overrides config; `--first-parent` overrides the configured walk. Repeated `--exclude` flags replace config
 exclusions; built-in lockfile, vendor, node_modules, dist, minified and source-map
 exclusions remain active. Thresholds are rounded to per-mille precision.
 `--depth` defaults to 1; zero disables directory reporting. Names are grouped by
@@ -141,7 +146,7 @@ tools/           repository policy scripts and their tests
 | ----- | ----------------------------------------------------------------------------------------- | ----------- |
 | 0     | Workspace, CI on Linux, Windows and macOS, policy checks, licensing                       | Done        |
 | 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
-| 2     | Token-level attribution with tree-sitter, merge-aware history, bulk-edit detection        | Planned     |
+| 2     | Token-level attribution with tree-sitter, merge-aware history, bulk-edit detection        | Merges done; tokens and bulk edits planned |
 | 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Planned     |
 | 4     | SVG badges and cards, shields.io endpoint, reusable GitHub Action                         | Planned     |
 

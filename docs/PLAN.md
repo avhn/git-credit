@@ -57,23 +57,52 @@ flowchart LR
 
 ## Attribution model
 
-### History walk (Phase 1: first parent)
+### History walk (Phase 2a: merge-aware full graph)
 
-Owner decision: Phase 1 walks the **first-parent** chain from the root to `HEAD`,
-oldest first. A merge commit is diffed against its first parent, so work done on a
-merged branch is attributed through the merge diff to the authors of the branch
-commits where they can be matched, and otherwise to the merge author. This is
-documented as approximate. Phase 2 replaces it with merge-aware replay over the
-full commit graph.
+Algorithm version 2 defaults to `full`: enumerate all commits reachable from HEAD
+and replay each exactly once. A deterministic topological schedule visits parents
+before children and breaks ready-commit ties by object ID, not timestamp. Identity
+participation and labor are accumulated once per visited commit.
 
-Only the current state is kept in memory: one attribution vector per live file.
-Labor accumulates once per visited commit into a per-author total. No historical
-file attribution is retained. The implementation stores the first-parent commit
-IDs to reverse the walk, so memory is live-tree state plus one commit's diff and
-O(commit count) object IDs, rather than historical file contents. Side branches
-are not replayed: existing first-parent provenance can survive a merge, but new
-branch content falls back to the merge author and co-authors. Reports warn when
-merges occur; recovering branch authors requires Phase 2's graph replay.
+Each commit starts with a clone of its first parent's ordered path map. Map values
+are shared `Arc` handles to immutable scored blobs and file attribution. Remaining
+child counts release a commit state immediately after its last reachable child
+consumes it. HEAD supplies final ownership. Memory is O(reachable commits and edges)
+for graph metadata, plus concurrently open branch states and transient diffs, not
+historical file contents. Verbose diagnostics report peak retained states, including
+the current output state before consumed parents are released.
+
+Non-merge commits keep the line-level diff, rename, move and labor rules below.
+For merges, diff against the first parent and consider other parents in recorded
+Git parent order:
+
+1. An exact blob ID match at the destination path, or a rename source reported by
+   gix, adopts that parent's entire file attribution unchanged with zero labor.
+2. Otherwise apply the ordinary first-parent change. For each newly inserted or
+   rewritten editor line, match identical normalized text in other parents at that
+   path (including detected rename sources). The first parent match, then earliest
+   physical line, wins. Restore that owner and refund exactly that line's recorded
+   labor shares. Repeated text uses the first match; this is provenance matching,
+   not a claim of unique source-line consumption.
+3. Unmatched editor lines remain conflict-resolution work. Retained lines and small
+   edits retain their ordinary scoring. Deletions remain deletions even when another
+   parent contains the path. Reconcile same-commit moves after parent matching.
+   Exact adoption preserves first-parent removal metadata. Source-only diffs against
+   every other parent also supply removed blocks, even for paths unchanged against
+   the first parent. Shared normalized text occurrences at a path are deduplicated
+   across parents, with first-parent precedence, to prevent duplicate move refunds.
+   This conservative union can split overlapping blocks; three consecutive removed
+   lines are still required. Source-only diffs never contribute labor or live state.
+
+The optional search across unrelated first-parent paths is not implemented. Matching
+is line-level, not semantic conflict understanding. The isolated raw-object diff
+cache remains shared across the walk, with transient blob resources cleared after
+each tree comparison. Repository attributes, diff drivers and textconv cannot run.
+
+`--first-parent` or `walk = "first-parent"` in `.git-credit.toml` selects the legacy
+walk. It visits only the first-parent chain and warns that merge diff attribution
+is approximate. The default and `walk = "full"` preserve branch provenance and do
+not emit that warning. The CLI flag overrides the configured walk.
 
 ### Normalization (Phase 1)
 
@@ -186,7 +215,7 @@ retroactively. After replay, opted-out groups are combined into one anonymous
 identity and all ownership, labor and directory IDs are remapped. The anonymous
 row has an empty representative email and an empty `emails` array. Grouping and
 privacy aggregation preserve total credit; zero-credit groups are not rendered.
-These review corrections retain algorithm version 1 because it is unpublished.
+These identity rules are retained in algorithm version 2.
 
 The committed HEAD map is used even with a dirty worktree. Configured
 `mailmap.blob` and trusted `mailmap.file` override it in that order; the latter
@@ -225,7 +254,7 @@ doing any work and fails with the command that fixes it
 ## Report contract
 
 `--json` output carries a schema version, `ALGORITHM_VERSION`, the analyzed `HEAD`,
-the walk mode (`first-parent`), the policy settings, units (`lines` in Phase 1),
+the walk mode (`full` or `first-parent`), the policy settings, units (`lines` in Phase 1),
 warnings, per-author ownership and labor, and per-directory breakdowns. The shape is
 documented in [json.md](json.md). Per-author and directory shares are fractions
 in 0..=1; table output converts them to percentages. Directory depth defaults to
@@ -255,11 +284,13 @@ split credit; a shallow clone fails with the fix. stdout stays clean when piped.
 
 ### Phase 2: token level and merges
 
-`credit-syntax` with tree-sitter (Rust, JavaScript and TypeScript first), token
-attribution, merge-aware replay over the full graph with deterministic parent
-precedence and labor counted once per commit, bulk find-and-replace detection with a
-visible discount. Acceptance includes diamond merges never double-counting labor and
-ownership mass being conserved.
+Phase 2a is implemented: merge-aware replay, deterministic parent precedence,
+bounded retained states, legacy walk selection and algorithm version 2. Fixtures
+cover branch merges, conflict-resolution lines, criss-cross ancestry, octopus
+merges, legacy numbers, linear-history equivalence and ownership conservation.
+
+Planned: `credit-syntax` with tree-sitter (Rust, JavaScript and TypeScript first),
+token attribution, and bulk find-and-replace detection with a visible discount.
 
 ### Phase 3: scale
 

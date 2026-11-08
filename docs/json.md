@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-    Policy[CLI and root configuration] --> Replay[First-parent replay]
+    Policy[CLI and root configuration] --> Replay[Merge-aware replay]
     Replay --> Credit[Fixed-point ownership and labor]
     Credit --> JSON[Schema version 1 JSON]
 ```
@@ -17,9 +17,9 @@ JSON and exit 1; invalid command-line usage exits 2.
 ```json
 {
   "schema_version": 1,
-  "algorithm_version": 1,
+  "algorithm_version": 2,
   "head": "0123456789012345678901234567890123456789",
-  "walk": "first-parent",
+  "walk": "full",
   "units": "lines",
   "policy": {
     "keep": 0.7,
@@ -58,15 +58,15 @@ built-in and custom glob, sorted and deduplicated.
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | Output structure version, currently 1 |
-| `algorithm_version` | Attribution semantics version, currently 1 |
+| `algorithm_version` | Attribution semantics version, currently 2 |
 | `head` | Full analyzed committed HEAD SHA-1 object ID |
-| `walk` | Always `first-parent`; side branches are not replayed |
+| `walk` | `full` by default; `first-parent` selects the legacy chain |
 | `units` | Always `lines`; blank and whitespace-only lines have zero weight |
 | `policy.keep` | Effective similarity threshold rounded to per-mille precision |
 | `policy.group_by` | `name` by default; `email` when selected through config or `--by-email` |
 | `policy.exclude` | Effective repository-relative globs, including built-ins |
 | `policy.max_file_size` | Maximum scored blob size in bytes, inclusive |
-| `commits_analyzed` | Number of first-parent commits, including root and HEAD |
+| `commits_analyzed` | Number of visited commits in the selected walk, including roots and HEAD |
 | `formatting_commits` | Commits without meaningful included content changes; renames are not formatting |
 | `authors` | Authors with positive ownership or historical labor, ordered by ownership descending, name, then email |
 | author `email` | Most frequently used canonical email in the group; lexical tie-break |
@@ -78,7 +78,7 @@ built-in and custom glob, sorted and deduplicated.
 | `total_lines` | Total live ownership in that directory |
 | directory author `lines` | That author's ownership in that directory |
 | directory author `share` | Fraction of directory ownership, from 0 to 1 |
-| `warnings` | Sorted, deduplicated messages about skipped files, lossy decoding, pairing caps and approximate merges |
+| `warnings` | Sorted, deduplicated messages about skipped files, lossy decoding, pairing caps and approximate merges (legacy walk only) |
 
 Root files belong to directory `.`. Empty directories represented by live empty
 files may have zero totals and no authors. Shares are zero when their denominator
@@ -105,6 +105,16 @@ anonymous. All opted-out groups merge into one row with `name: "anonymous"`,
 combined ownership remains in all denominators. Neither policy metadata nor
 `emails` reveals opted-out addresses.
 
-These are provenance statistics, not a measure of a person's value. Merge
-attribution is approximate: provenance from the first parent survives where
-matched, while new branch content is credited to merge authors and trailers.
+These are provenance statistics, not a measure of a person's value. In `full`
+mode each reachable commit is visited once in parent-before-child order, with
+object ID tie-breaking. Merge blobs matching another parent preserve its ownership
+with zero labor; matching inserted or rewritten normalized lines inherit parent
+owners and refund their insertion labor. Only unmatched editor lines remain new
+merge work. Small edits keep the ordinary fractional-labor rule.
+
+`--first-parent` or `walk = "first-parent"` in `.git-credit.toml` selects legacy
+attribution: new branch content in merge diffs goes to merge authors and trailers,
+with an approximation warning. `walk = "full"` is the default. Algorithm version 2
+applies to both modes; schema version remains 1. Identity display spelling follows
+the first resolved occurrence in the deterministic selected walk. Verbose stderr
+also reports peak retained commit states; that diagnostic is not a JSON field.

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Algorithm version 2 defaults to merge-aware full-history replay. All reachable
+  commits contribute labor once in deterministic parent-before-child order.
+- Merge blobs and normalized editor lines matching other parents retain parent
+  ownership without duplicate merge labor. Unmatched lines remain resolution work.
+- Retained commit states share unchanged files and are released after their last
+  reachable child. Verbose diagnostics include the peak retained state count.
+- `--first-parent` and `walk = "first-parent"` retain legacy attribution. JSON `walk`
+  now reports `full` or `first-parent`; schema version remains 1. Full mode no longer
+  emits the approximate-merge warning.
+
 ### Added
 
 - Pure line-attribution engine with deterministic normalized diffs, bounded
@@ -29,6 +41,10 @@ All notable changes to this project are documented here. The format follows
 - Dual licensing under MIT OR Apache-2.0.
 
 ### Fixed
+
+- Exact merge-parent blob adoption retains removed first-parent blocks as move
+  sources. Moves can also recover provenance from other parents, without counting
+  shared source occurrences twice or attributing inherited moves to the merger.
 
 - Blank and whitespace-only lines now carry zero ownership and labor. Blank-only
   additions, removals and relocations are formatting and preserve meaningful owners.
