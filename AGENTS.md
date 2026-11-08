@@ -57,3 +57,11 @@ Local gate before any push: `cargo fmt --all --check && cargo lint && cargo test
   public open source project.
 - **Dependabot is enabled.** Its pull requests are update notices only; changes still
   land on `main` through the normal local flow.
+- **Tagged CLI releases.** `release.yml` runs on `v*` tag pushes, rather than only
+  branch pushes: tagged releases are the norm for open source CLIs. Tag/workspace
+  version equality, policy, static checks, tests and all target builds gate release.
+  Only its publication job can write repository contents.
+- **Badge publication is generated-only.** `badges.yml` publishes an orphan assets
+  branch on main pushes, using an explicit branch lease and a current-main SHA
+  check. No source commits are rewritten. The composite action uses the same
+  publisher and allows callers to disable publication.

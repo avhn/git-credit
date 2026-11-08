@@ -37,6 +37,7 @@ flowchart LR
 | ------------- | --------------------------------------------------------------------------- | ------------------------------ |
 | `credit-core` | Normalization, diff, attribution, aggregation over in-memory inputs; no I/O | `similar` (from Phase 1)       |
 | `credit-git`  | Object access, commit walk, rename detection, `.mailmap`, trailers          | `gix`                          |
+| `credit-badge` | Pure deterministic SVG and shields.io JSON from privacy-filtered summaries | None (std only)              |
 | `git-credit`  | CLI, configuration, orchestration, table, JSON and SVG output               | `clap`, `serde`, `toml`, `globset` |
 | Token lexer in `credit-core` (Phase 2b) | Language-independent canonical tokens | No additional dependencies |
 
@@ -430,7 +431,23 @@ Benchmarks on large public repositories.
 
 ### Phase 4: badges and the GitHub Action
 
-SVG contributor bar, per-person badges, summary card, bus-factor badge, shields.io
-endpoint JSON. A reusable `action.yml` and a workflow that runs on every push to
-`main` and force-pushes generated assets to an orphan `badges` branch; this
-repository dogfoods it. Badge text is escaped and opted-out identities never appear.
+Implemented: dependency-free `credit-badge` renders an SVG contributor bar,
+per-person badges, light/dark summary card, strict-majority bus-factor badge and
+shields.io endpoint JSON. Names are XML-escaped; conservative fixed font metrics
+fit labels to columns. Bar legend tenths use largest-remainder rounding. Bus factor
+counts the minimum ranked contributors strictly exceeding 50% live ownership.
+
+`badge` shares the validated configuration and analysis boundary with `analyze`.
+It can instead import a schema 1 report without Git access. Outputs include the
+complete `credit.json`; imports must already have their privacy policy applied.
+Re-rendering removes stale managed SVGs, including identities later anonymized.
+
+The composite `action.yml` verifies downloaded release checksums or accepts a local
+binary. It stages only known generated assets in a fresh orphan repository, then
+publishes with a lease against the fetched branch tip (a creation-only lease for
+absent branches). The main dogfood workflow builds from source and checks that the
+triggering SHA is still remote main immediately before publication. Tag-triggered
+releases validate workspace-version equality and quality gates before publishing
+five platform archives and SHA256SUMS. Hosted tag/build/publication behavior still
+requires qualification on GitHub. See [badges.md](badges.md) for inputs and privacy
+retention limitations; publishing does not erase external copies or cached history.

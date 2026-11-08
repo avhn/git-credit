@@ -109,7 +109,26 @@ Rename detection uses an isolated raw-object cache: staged/dirty attributes and
 configured diff drivers or text conversion do not affect attribution.
 
 Exit codes are 0 for success, 1 for analysis/configuration errors and 2 for invalid
-CLI usage. Badges and a reusable GitHub Action remain planned.
+CLI usage. Badges and the reusable GitHub Action are described below.
+
+## Badges
+
+![Contributions](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar.svg)
+![Contribution summary](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg)
+![Bus factor](https://raw.githubusercontent.com/avhn/git-credit/badges/bus-factor.svg)
+
+```console
+$ cargo run --locked -- badge . --out-dir .git-credit
+$ git-credit badge --from credit.json --out-dir .git-credit --style card --theme dark
+```
+
+The source-built dogfood workflow publishes these files to an orphan `badges`
+branch on main pushes. Images become available after its first successful run.
+The reusable GitHub Action verifies release checksums and can publish to the same
+kind of generated-only branch in other repositories. See [badge documentation](docs/badges.md)
+for workflow examples, all inputs, shields.io endpoints and privacy/retention notes.
+Opt-outs apply before rendering; imported reports must already be privacy-filtered.
+The generated `credit.json` also contains non-opted-out canonical email addresses.
 
 ## Prerequisites
 
@@ -146,6 +165,7 @@ $ cargo run -- --help
 crates/
   credit-core/   pure attribution engine: normalization, diff, ownership and labor ledgers (no I/O)
   credit-git/    repository access: history walk, renames, .mailmap, co-author trailers
+  credit-badge/  pure deterministic SVG badges, cards and shields.io endpoint JSON
   git-credit/    the command-line binary
 docs/PLAN.md     architecture and roadmap
 tools/           repository policy scripts and their tests
@@ -159,7 +179,7 @@ tools/           repository policy scripts and their tests
 | 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
 | 2     | Language-agnostic token attribution, merge-aware history, bulk-edit detection             | Done |
 | 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Planned     |
-| 4     | SVG badges and cards, shields.io endpoint, reusable GitHub Action                         | Planned     |
+| 4     | SVG badges and cards, shields.io endpoints, reusable GitHub Action and tagged binaries   | Implemented; hosted release/publication pending |
 
 Details and design decisions: [docs/PLAN.md](docs/PLAN.md).
 

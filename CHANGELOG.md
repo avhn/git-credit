@@ -32,6 +32,18 @@ All notable changes to this project are documented here. The format follows
   input tests. Phase 2a merge fixtures now run under both granularities.
 - Reproducible Myers/histogram token-stream benchmark; Myers remains the runtime
   choice. Histogram is a development-only comparison dependency.
+- Dependency-free `credit-badge` renderer: escaped deterministic SVG contributor
+  bars, light/dark summary cards, strict-majority bus-factor and safe per-author
+  badges, plus shields.io endpoint JSON and complete percentage rounding.
+- Offline `badge` command using the existing analysis/configuration/privacy path,
+  schema 1 report import, style/top/width controls, silent stdout and stale managed
+  asset cleanup after identity or style changes.
+- Composite GitHub Action with release checksum verification, optional local binary,
+  generated-only orphan publication, explicit leases and stale-source protection.
+- Tagged release workflow for Linux x86_64/ARM64, macOS x86_64/ARM64 and Windows
+  x86_64 archives, licenses, README and SHA256SUMS; source-built main badge dogfooding.
+- Badge usage, action inputs and publication privacy/retention documentation.
+
 - Pure line-attribution engine with deterministic normalized diffs, bounded
   similarity pairing, fixed-point ownership and labor, co-author shares, and
   same-commit cross-file block moves. Algorithm version is now 1.
