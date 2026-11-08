@@ -1,5 +1,6 @@
 //! Offline ownership and labor reports for committed Git history.
 
+mod badge;
 mod config;
 mod output;
 
@@ -18,6 +19,8 @@ struct Cli {
 enum Command {
     /// Analyze committed HEAD using merge-aware history replay.
     Analyze(Analyze),
+    /// Render ownership badges and a report into a directory, without stdout output.
+    Badge(badge::Badge),
 }
 /// Analysis inputs and output controls. CLI policy values override configuration.
 #[derive(Debug, clap::Args)]
@@ -63,10 +66,11 @@ struct Analyze {
 
 /// Parse usage errors as exit 2, analysis errors as exit 1, successful output as 0.
 fn main() -> ExitCode {
-    let Cli {
-        command: Command::Analyze(args),
-    } = Cli::parse();
-    match run(&args) {
+    let result = match Cli::parse().command {
+        Command::Analyze(args) => run(&args),
+        Command::Badge(args) => badge::run(&args),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("git-credit: {}", output::plain(&format!("{error:#}")));

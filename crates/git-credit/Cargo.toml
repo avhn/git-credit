@@ -14,6 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 clap.workspace = true
+credit-badge.workspace = true
 credit-core.workspace = true
 credit-git.workspace = true
 serde = { version = "1", features = ["derive"] }
