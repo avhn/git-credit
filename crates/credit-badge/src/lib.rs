@@ -15,6 +15,9 @@
 
 use std::fmt::{self, Write};
 
+mod charts;
+mod treemap;
+
 /// One already privacy-filtered identity. The renderer never reads identities itself.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Author {
@@ -35,6 +38,23 @@ pub struct Report {
     pub commits: u64,
     /// Analyzed HEAD identifier; the card displays its first twelve characters.
     pub head: String,
+    /// Total surviving ownership in line-equivalent units.
+    pub total_lines: f64,
+    /// Flat directory totals at the requested analysis depth.
+    pub directories: Vec<Directory>,
+}
+
+/// One privacy-filtered directory, colored by its leading owner.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Directory {
+    /// Repository-relative path.
+    pub path: String,
+    /// Nonnegative finite surviving ownership in lines.
+    pub total_lines: f64,
+    /// Leading owner's public display name.
+    pub owner: String,
+    /// Leading owner's fraction of this directory in 0..=1.
+    pub owner_share: f64,
 }
 
 /// Summary card color scheme.
@@ -75,6 +95,12 @@ pub struct Badges {
     pub bar: String,
     /// Ownership and labor summary card.
     pub card: String,
+    /// Proportional ownership ring and apportioned legend.
+    pub donut: String,
+    /// Grouped ownership and historical labor bars in line units.
+    pub labor: String,
+    /// Squarified flat directory ownership map.
+    pub treemap: String,
     /// Flat bus-factor badge.
     pub bus_factor: String,
     /// Safe unique filename stems paired with per-author SVG strings.
@@ -96,11 +122,14 @@ pub enum Error {
     InvalidAuthor,
     /// Positive shares must sum to one within one millionth.
     InvalidShareTotal,
+    /// A report or directory total/share is not finite or is out of range.
+    InvalidDirectory,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::InvalidDirectory => "report and directory totals must be finite and nonnegative, and directory shares in 0..=1",
             Self::InvalidTop => "top must be in 1..=1000",
             Self::InvalidWidth => "width must be in 200..=4096",
             Self::InvalidAuthor => {
@@ -165,6 +194,9 @@ pub fn render(report: &Report, options: Options) -> Result<Badges, Error> {
     Ok(Badges {
         bar: bar(&authors, total, options),
         card: card(&authors, report, options),
+        donut: charts::donut(&authors, total, options),
+        labor: charts::labor(&authors, report, options),
+        treemap: treemap::render(&authors, report, options),
         bus_factor: flat("bus factor", &message, color),
         authors: author_badges,
         bus_factor_json: endpoint("bus factor", &message, color),
@@ -174,6 +206,17 @@ pub fn render(report: &Report, options: Options) -> Result<Badges, Error> {
 
 /// Validate all numbers before sorting, summing, rounding or producing geometry.
 fn validate(report: &Report, options: Options) -> Result<(), Error> {
+    if !report.total_lines.is_finite()
+        || report.total_lines < 0.0
+        || report.directories.iter().any(|d| {
+            !d.total_lines.is_finite()
+                || d.total_lines < 0.0
+                || !d.owner_share.is_finite()
+                || !(0.0..=1.0).contains(&d.owner_share)
+        })
+    {
+        return Err(Error::InvalidDirectory);
+    }
     if !(1..=1000).contains(&options.top) {
         return Err(Error::InvalidTop);
     }
@@ -212,10 +255,51 @@ fn bus_factor(authors: &[&Author], total: f64) -> usize {
     0
 }
 
-/// Darkened categorical palette, deterministic by rank; labels do not rely on color.
-const PALETTE: [&str; 8] = [
-    "#1769aa", "#a34c00", "#237a3b", "#993d80", "#006f73", "#7050a0", "#ad3434", "#645d00",
+/// Color-blind-safe categorical colors in author-rank order, shared with terminals.
+/// Light colors are darkened Okabe-Ito hues for contrast on white.
+pub const PALETTE: [&str; 8] = [
+    "#0072b2", "#a65f00", "#007b5e", "#97558a", "#007f9b", "#b84400", "#827000", "#666666",
 ];
+
+/// Theme-specific text and categorical colors; labels never rely on color alone.
+impl Theme {
+    /// Background, foreground and secondary text, respectively.
+    fn colors(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Light => ("#fff", "#24292f", "#57606a"),
+            Self::Dark => ("#161b22", "#f0f6fc", "#b1bac4"),
+        }
+    }
+
+    /// Neutral aggregate fill, distinct from rank-based author coloring.
+    fn neutral(self) -> &'static str {
+        match self {
+            Self::Light => "#666666",
+            Self::Dark => "#a0a0a0",
+        }
+    }
+
+    /// Rank-preserving brighter counterparts for dark surfaces.
+    pub fn color(self, rank: usize) -> &'static str {
+        let palette = match self {
+            Self::Light => PALETTE,
+            Self::Dark => [
+                "#56b4e9", "#e69f00", "#009e73", "#cc79a7", "#66c2d4", "#ed7845", "#d5c45b",
+                "#a0a0a0",
+            ],
+        };
+        palette
+            .get(rank % palette.len())
+            .copied()
+            .unwrap_or("#777777")
+    }
+}
+
+/// Reject bidi formatting and terminal controls while preserving ordinary Unicode.
+fn unsafe_scalar(c: char) -> bool {
+    c.is_control()
+        || matches!(u32::from(c), 0x061c | 0x200e | 0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
+}
 
 /// Replace XML 1.0 forbidden scalars and escape all markup/attribute delimiters.
 fn xml(text: &str) -> String {
@@ -228,7 +312,7 @@ fn xml(text: &str) -> String {
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
             '\t' | '\n' | '\r' => out.push(' '),
-            c if c < ' ' || c == '\u{fffe}' || c == '\u{ffff}' => out.push('\u{fffd}'),
+            c if unsafe_scalar(c) || c == '\u{fffe}' || c == '\u{ffff}' => out.push('\u{fffd}'),
             c => out.push(c),
         }
     }
@@ -344,6 +428,7 @@ fn bar(authors: &[&Author], total: f64, options: Options) -> String {
     if other > 0.0 {
         groups.push(("others", other));
     }
+    let (bg, fg, _) = options.theme.colors();
     let shares: Vec<_> = groups.iter().map(|(_, share)| *share).collect();
     let units = percentages(&shares, total);
     let mut out = svg(
@@ -353,13 +438,17 @@ fn bar(authors: &[&Author], total: f64, options: Options) -> String {
     );
     let _ = write!(
         out,
-        "<rect width=\"{}\" height=\"{}\" fill=\"#fff\"/>",
+        "<rect width=\"{}\" height=\"{}\" fill=\"{bg}\"/>",
         options.width,
         42 + groups.len() * 24
     );
     let mut x = 0.0;
     for (i, ((name, share), percent)) in groups.iter().zip(units).enumerate() {
-        let color = PALETTE.get(i % PALETTE.len()).copied().unwrap_or("#555");
+        let color = if i >= options.top {
+            options.theme.neutral()
+        } else {
+            options.theme.color(i)
+        };
         let width = share / total * f64::from(options.width);
         let _ = write!(
             out,
@@ -373,7 +462,7 @@ fn bar(authors: &[&Author], total: f64, options: Options) -> String {
             percent / 10,
             percent % 10
         );
-        text(&mut out, 32, 44 + i * 24, &label, "#24292f");
+        text(&mut out, 32, 44 + i * 24, &label, fg);
         x += width;
     }
     out.push_str("</svg>\n");
@@ -384,10 +473,7 @@ fn bar(authors: &[&Author], total: f64, options: Options) -> String {
 fn card(authors: &[&Author], report: &Report, options: Options) -> String {
     let count = authors.len().min(options.top);
     let height = 112 + count * 26;
-    let (bg, fg, muted) = match options.theme {
-        Theme::Light => ("#fff", "#24292f", "#57606a"),
-        Theme::Dark => ("#161b22", "#f0f6fc", "#b1bac4"),
-    };
+    let (bg, fg, muted) = options.theme.colors();
     let mut out = svg(options.width, height, "Contributions");
     let _ = write!(
         out,
@@ -433,6 +519,13 @@ fn card(authors: &[&Author], report: &Report, options: Options) -> String {
             &fit(&format!("{:.1}", author.labor), 53),
             fg,
         );
+        let bar_width = author.ownership_share * f64::from(options.width - 32);
+        let color = options.theme.color(i);
+        let _ = write!(
+            out,
+            "<rect x=\"16\" y=\"{}\" width=\"{bar_width:.4}\" height=\"4\" fill=\"{color}\"/>",
+            y + 5
+        );
         out.push_str("</g>");
     }
     let short: String = report.head.chars().take(12).collect();
@@ -468,6 +561,10 @@ fn slug(name: &str) -> String {
     }
     if out == "author-" {
         out.push_str("anonymous");
+    }
+    // Reserve the theme suffix to avoid collisions between light and dark author SVGs.
+    if out.ends_with("-dark") {
+        out.push_str("-author");
     }
     out
 }
