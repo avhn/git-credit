@@ -1,10 +1,17 @@
-# git-credit
+<h1 align="center">git-credit</h1>
 
-[![CI](https://github.com/avhn/git-credit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/avhn/git-credit/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/avhn/git-credit)](https://github.com/avhn/git-credit/releases/latest)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+<p align="center">
+  Fair git authorship stats. Formatting and small edits never steal credit.
+</p>
 
-**Fair git authorship stats.** `git-credit` shows who wrote how much of a repository
+<p align="center">
+  <a href="https://github.com/avhn/git-credit/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/avhn/git-credit"></a>
+  <a href="https://github.com/avhn/git-credit/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/avhn/git-credit/ci.yml?branch=main&label=ci"></a>
+  <a href="#license"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue"></a>
+  <a href="https://avhn.github.io/git-credit/"><img alt="Install: brew, apt, script" src="https://img.shields.io/badge/install-brew%20%7C%20apt%20%7C%20script-000000"></a>
+</p>
+
+`git-credit` shows who wrote how much of a repository
 and how much work each person put in, without letting a formatter run, a renamed
 variable or a one-character fix take the credit away from the original author.
 
