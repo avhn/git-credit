@@ -113,9 +113,16 @@ jobs:
           components: llvm-tools-preview
       - name: Restore dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Install packaging test tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils
       - name: Run tooling tests
         if: runner.os == 'Linux'
-        run: tools/tests/check-commit-msg.test.sh
+        run: |
+          bash tools/tests/check-commit-msg.test.sh
+          bash tools/tests/packaging.test.sh
       - name: Run action helper tests
         if: runner.os == 'Linux'
         run: python3 -I tools/tests/action_helpers_test.py

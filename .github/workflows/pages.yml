@@ -1,0 +1,48 @@
+# Purpose: Rebuild the installation page around the retained signed APT repository.
+# Triggers: Manual dispatch on main only.
+# Production effect: Update gh-pages and deploy the retained site without publishing a release.
+# Gates: Existing signed APT repository, symlink rejection and successful page rendering.
+# External dependencies: GitHub-hosted runner, gh-pages branch and GitHub Pages via github.token.
+# Failure owner: avhn, GitHub Actions run status and logs.
+# Budgets: Initial estimates set 2026-11-09; remeasure successful runs with 2x headroom.
+name: Pages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    name: Build and deploy
+    if: github.repository == 'avhn/git-credit' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: git-credit-apt-repository
+      cancel-in-progress: false
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rebuild the retained site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APT_PREVIOUS_FINGERPRINT: ${{ vars.APT_PREVIOUS_FINGERPRINT }}
+        run: bash tools/prepare-pages.sh rebuild
+      - name: Upload the retained Pages repository
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ env.PAGES_DIRECTORY }}
+          name: git-credit-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Deploy the retained site to Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: git-credit-pages-${{ github.run_id }}-${{ github.run_attempt }}

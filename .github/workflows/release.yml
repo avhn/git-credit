@@ -1,8 +1,8 @@
-# Purpose: Validate tagged CLI releases and publish platform archives with checksums.
+# Purpose: Validate tagged CLI releases and publish archives, Debian packages, Homebrew and APT.
 # Triggers: Push of v-prefixed tags; deliberate tagged-release policy in AGENTS.md.
-# Production effect: Create a GitHub release and upload five platform archives and SHA256SUMS.
+# Production effect: Create a GitHub release, update avhn/homebrew-tap and deploy the retained APT site.
 # Gates: Tag/workspace version equality, text policy, static checks, unit tests and all target builds.
-# External dependencies: GitHub-hosted runners, crates.io, pinned actions and GitHub releases via github.token.
+# External dependencies: Hosted runners, crates.io, GitHub releases/Pages, HOMEBREW_TAP_DEPLOY_KEY, APT_SIGNING_KEY and APT_SIGNING_PASSPHRASE.
 # Failure owner: avhn, GitHub Actions run status and logs.
 # Budgets: Initial estimates set 2026-11-08; remeasure successful runs with 2x headroom.
 name: Release
@@ -85,10 +85,15 @@ jobs:
           toolchain: stable
       - name: Restore dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Install packaging test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils
       - name: Run tooling tests
         run: |
           bash tools/tests/check-commit-msg.test.sh
           python3 -I tools/tests/action_helpers_test.py
+          bash tools/tests/packaging.test.sh
       - name: Run unit tests
         run: cargo test --workspace --locked
   build:
@@ -98,9 +103,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             runner: macos-latest
@@ -124,11 +129,24 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: release-${{ matrix.target }}
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools lintian
       - name: Build packages
         env:
           TARGET: ${{ matrix.target }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
         run: cargo build --release --locked --target "$TARGET"
         shell: bash
+      - name: Strip the Linux executable
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: strip "target/$TARGET/release/git-credit"
       - name: Package release archive
         shell: bash
         env:
@@ -138,15 +156,45 @@ jobs:
           python_cmd=python3
           if [ "$RUNNER_OS" = Windows ]; then python_cmd=python; fi
           "$python_cmd" -I tools/package-release.py "$TARGET"
+      - name: Verify the static Linux binary
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if readelf -l "target/$TARGET/release/git-credit" | grep -q INTERP; then
+            echo 'Linux release binary must be statically linked' >&2
+            exit 1
+          fi
+          "target/$TARGET/release/git-credit" --version
+      - name: Package Debian release
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            x86_64-*) arch=amd64 ;;
+            aarch64-*) arch=arm64 ;;
+            *) exit 1 ;;
+          esac
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          bash tools/package-deb.sh "$RELEASE_TAG" "$arch" "target/$TARGET/release/git-credit" dist
+          lintian --fail-on error dist/*.deb
       - name: Upload build evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
-          path: dist/git-credit-*
+          path: dist/*
           if-no-files-found: error
           retention-days: 7
   publish:
     name: Publish packages
+    outputs:
+      provenance-artifact-id: ${{ steps.provenance.outputs.artifact-id }}
     needs: [policy, static, unit, build]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -161,7 +209,15 @@ jobs:
           merge-multiple: true
       - name: Generate release checksums
         working-directory: assets
-        run: sha256sum git-credit-*.tar.gz git-credit-*.zip > SHA256SUMS
+        run: sha256sum git-credit-*.tar.gz git-credit-*.zip git-credit_*.deb > SHA256SUMS
+      - name: Upload release checksum provenance
+        id: provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-provenance-${{ github.run_attempt }}
+          path: assets/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -169,5 +225,213 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          gh release create "$RELEASE_TAG" assets/git-credit-* assets/SHA256SUMS \
+          gh release create "$RELEASE_TAG" assets/git-credit-* assets/git-credit_*.deb assets/SHA256SUMS \
             --verify-tag --target "$RELEASE_SHA" --title "$RELEASE_TAG" --generate-notes
+  homebrew:
+    name: Publish Homebrew formula
+    environment: homebrew-tap
+    needs: [policy, static, unit, build, publish]
+    if: github.repository == 'avhn/git-credit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: git-credit-homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download trusted release provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.publish.outputs.provenance-artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/git-credit-release-provenance
+      - name: Download and verify Homebrew release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets="$(mktemp -d "$RUNNER_TEMP/git-credit-brew-assets.XXXXXX")"
+          gh release download "$RELEASE_TAG" --pattern 'git-credit-*.tar.gz' --pattern SHA256SUMS --dir "$assets"
+          python3 -I tools/verify-release.py --provenance "$RUNNER_TEMP/git-credit-release-provenance/SHA256SUMS" "$assets" \
+            git-credit-aarch64-apple-darwin.tar.gz git-credit-x86_64-apple-darwin.tar.gz \
+            git-credit-aarch64-unknown-linux-musl.tar.gz git-credit-x86_64-unknown-linux-musl.tar.gz
+      - name: Render and syntax-check the formula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          output="$RUNNER_TEMP/git-credit-tap-rendered"
+          bash tools/render-homebrew.sh "$RELEASE_TAG" "$RUNNER_TEMP/git-credit-release-provenance/SHA256SUMS" "$output"
+          ruby -c "$output/Formula/git-credit.rb"
+          printf 'TAP_OUTPUT=%s\n' "$output" >> "$GITHUB_ENV"
+      - name: Start the deploy-key SSH agent
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set +x
+          if [[ -z "$TAP_DEPLOY_KEY" ]]; then
+            echo 'HOMEBREW_TAP_DEPLOY_KEY is required' >&2
+            exit 1
+          fi
+          # ssh-agent is an argument-free trusted command emitting shell assignments.
+          eval "$(ssh-agent -s)"
+          printf 'SSH_AUTH_SOCK=%s\nSSH_AGENT_PID=%s\n' "$SSH_AUTH_SOCK" "$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          printf '%s\n' "$TAP_DEPLOY_KEY" | ssh-add -
+          curl --proto '=https' --tlsv1.2 -fsS --connect-timeout 20 --max-time 60 https://api.github.com/meta \
+            | jq -er '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/git-credit-known-hosts"
+      - name: Update and publish the tap
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$RUNNER_TEMP/git-credit-known-hosts'"
+          tap="$(mktemp -d "$RUNNER_TEMP/git-credit-tap.XXXXXX")"
+          git clone --depth 1 git@github.com:avhn/homebrew-tap.git "$tap"
+          if [[ -n "$(find "$tap" -type l -print -quit)" ]]; then
+            echo 'Tap contains a symlink' >&2
+            exit 1
+          fi
+          mkdir -p "$tap/Formula"
+          cp "$TAP_OUTPUT/Formula/git-credit.rb" "$tap/Formula/git-credit.rb"
+          python3 -I tools/update-tap-readme.py "$tap/README.md"
+          git -C "$tap" config user.name 'git-credit-release[bot]'
+          git -C "$tap" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$tap" add Formula/git-credit.rb README.md
+          if ! git -C "$tap" diff --cached --quiet; then
+            git -C "$tap" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m "git-credit ${RELEASE_TAG#v}"
+            git -C "$tap" push origin HEAD
+          fi
+      - name: Stop the SSH agent
+        if: always()
+        run: |
+          if [[ -n "${SSH_AGENT_PID:-}" ]]; then ssh-agent -k; fi
+  verify-homebrew:
+    name: Verify Homebrew installation
+    needs: [homebrew]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Select Homebrew on Linux
+        if: runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+      - name: Install and verify the published formula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          HOMEBREW_NO_ANALYTICS: '1'
+        run: |
+          brew install avhn/tap/git-credit
+          git-credit --version | grep -F "${RELEASE_TAG#v}"
+          brew test avhn/tap/git-credit
+      - name: Check Homebrew style and audit
+        env:
+          HOMEBREW_NO_ANALYTICS: '1'
+        run: |
+          brew style --formula avhn/tap/git-credit
+          brew audit --strict --online avhn/tap/git-credit
+  apt:
+    name: Publish APT repository and deploy Pages
+    needs: [policy, static, unit, build, publish]
+    if: github.repository == 'avhn/git-credit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Shared with manual Pages deployment, covering branch read through deployment.
+    concurrency:
+      group: git-credit-apt-repository
+      cancel-in-progress: false
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install APT repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils
+      - name: Download trusted release provenance
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.publish.outputs.provenance-artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/git-credit-release-provenance
+      - name: Download and verify Debian release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets="$(mktemp -d "$RUNNER_TEMP/git-credit-apt-assets.XXXXXX")"
+          debs="$(mktemp -d "$RUNNER_TEMP/git-credit-debs.XXXXXX")"
+          gh release download "$RELEASE_TAG" --pattern '*.deb' --pattern SHA256SUMS --dir "$assets"
+          python3 -I tools/verify-release.py --provenance "$RUNNER_TEMP/git-credit-release-provenance/SHA256SUMS" "$assets" \
+            "git-credit_${RELEASE_TAG#v}-1_amd64.deb" "git-credit_${RELEASE_TAG#v}-1_arm64.deb"
+          cp "$assets/"*.deb "$debs/"
+          printf 'RELEASE_DEBS=%s\n' "$debs" >> "$GITHUB_ENV"
+      - name: Retain packages and sign the APT repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          APT_SIGNING_PASSPHRASE: ${{ secrets.APT_SIGNING_PASSPHRASE }}
+          APT_PREVIOUS_FINGERPRINT: ${{ vars.APT_PREVIOUS_FINGERPRINT }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash tools/prepare-pages.sh release "$RELEASE_DEBS" "$RELEASE_TAG"
+      - name: Upload the retained Pages repository
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ env.PAGES_DIRECTORY }}
+          name: git-credit-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Deploy the APT repository to Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: git-credit-pages-${{ github.run_id }}-${{ github.run_attempt }}
+  verify-apt:
+    name: Verify APT installation
+    needs: [apt]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:12', 'ubuntu:22.04']
+    container:
+      image: ${{ matrix.image }}
+      options: --memory=2g --memory-swap=2g
+    steps:
+      - name: Install repository prerequisites
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl gnupg
+      - name: Trust the expected APT signing key
+        run: |
+          set -eu
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --connect-timeout 20 --max-time 120 \
+            https://avhn.github.io/git-credit/apt/git-credit-archive-keyring.gpg \
+            -o /usr/share/keyrings/git-credit-archive-keyring.gpg
+          key_listing="$(gpg --batch --with-colons --show-keys /usr/share/keyrings/git-credit-archive-keyring.gpg)"
+          fingerprint="$(printf '%s\n' "$key_listing" | awk -F: '$1 == "pub" { count++; primary = 1; next } primary && $1 == "fpr" { print $10; primary = 0 } END { if (count != 1) exit 1 }')"
+          test "$fingerprint" = 097DDFE92CE4B0F4E204F434668F8E1D756456FD
+          echo 'deb [signed-by=/usr/share/keyrings/git-credit-archive-keyring.gpg] https://avhn.github.io/git-credit/apt stable main' > /etc/apt/sources.list.d/git-credit.list
+      - name: Install and verify the published package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          apt-get update -o Acquire::Retries=5
+          apt-get install -y "git-credit=${RELEASE_TAG#v}-1"
+          git-credit --version | grep -F "${RELEASE_TAG#v}"
