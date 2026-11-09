@@ -522,6 +522,52 @@ than a quadratic block-pair scan. This conservative bound may miss large moves o
 matches hidden behind more than 32 competing sources. Line mode is unchanged.
 
 
+### Timeline data layer
+
+`Options::timeline` is opt-in, shared by CLI callers. `analyze --timeline` and
+root config `timeline = true` enable both series. Legacy first-parent-only replay
+is rejected with timeline: samples must use full-graph provenance and the last
+sample must equal the ordinary final ownership ledger. Attribution semantics and
+algorithm version are unchanged; JSON schema 1 gains only an optional section.
+
+```mermaid
+flowchart LR
+    subgraph Before[Final report only]
+        R[Replay commits] --> L[Final ledger] --> P[Privacy mapping] --> J[JSON]
+    end
+    subgraph After[Optional historical summaries]
+        H[First-parent sample plan] --> S[Replay and sample after commit]
+        S --> O[Integer ownership summaries]
+        C[Cached per-commit labor] --> W[UTC author-time weeks]
+        O --> M[Final alias and opt-out mapping]
+        W --> M
+        M --> I[Sorted report-local author indexes]
+    end
+```
+
+Activity buckets use author timestamps from Git objects, not committer time,
+because rebases and merges can change committer time without changing when work
+was written. Each reachable commit contributes its existing cached labor exactly
+once. Monday UTC boundaries use Euclidean division, including pre-epoch dates.
+
+Ownership sample positions are computed before replay by following the first
+parent from HEAD. Positions count from the oldest ancestor; the stride is
+max(1, ceil((length-1)/119)), with both endpoints retained, at most 120 points.
+Immediately after each selected commit is scored, aggregate its live files into
+integer ownership totals. No historical file maps are retained for charts. Author
+timestamps are metadata only and need not be monotonic. Both series pass through
+the same final identity mapping as the ledger and directories, including late
+aliases and historical-only authors. JSON remaps to its sorted author row indexes.
+
+Cache format 3 adds ownership summaries and a SHA-256 fingerprint of ordered
+numeric identity allocations. Appended identities permit reuse; renumbered old
+identities invalidate summaries because token ownership rounding is ID-ordered.
+Validation occurs before resumed files are exposed: check processed commit
+membership, author bounds, checked sums and whole-line ownership totals, plus
+agreement with retained snapshots where available. Missing requested coverage,
+including stride changes, triggers cold reconstruction, never truncation. The
+existing checksummed atomic 256 MiB cap remains. Timestamps are not cached.
+
 ### Phase 4: badges and the GitHub Action
 
 Implemented: dependency-free `credit-badge` renders an SVG contributor bar,

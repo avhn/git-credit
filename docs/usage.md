@@ -21,7 +21,8 @@ ignored.
 | Flag                         | Default        | Effect                                                                  |
 | ---------------------------- | -------------- | ----------------------------------------------------------------------- |
 | `--json`                     | off            | Versioned JSON report instead of a table ([contract](json.md))          |
-| `--depth N`                  | `1`            | Directory breakdown depth for JSON and `--tree`; `0` disables it                      |
+| `--timeline`                 | off            | Add weekly labor and sampled ownership to JSON; requires full history   |
+| `--depth N`                  | `1`            | Directory breakdown depth for JSON and `--tree`; `0` disables it        |
 | `--exclude GLOB`             | none           | Skip matching paths; repeat the flag; replaces config exclusions        |
 | `--by-email`                 | off            | Do not merge identities that share a display name                       |
 | `--granularity line\|token`  | `token`        | Attribution unit; reports always use line-equivalent units              |
@@ -154,6 +155,7 @@ granularity = "token"     # or "line"
 keep = 0.70               # line granularity only
 bulk_discount = true
 cache = true
+timeline = false         # opt in to historical JSON series; requires full walk
 group_by = "name"         # or "email"
 exclude = ["generated/**", "fixtures/**"]
 opt_out = ["private@example.com"]

@@ -174,3 +174,63 @@ Caching does not add fields or alter report bytes. `commits_analyzed` remains th
 complete selected-history count, not just cache misses. Cache diagnostics and size
 appear only on verbose stderr. Identity changes that affect co-author splitting
 or rounding cause cold fallback; current mailmap display and opt-out always apply.
+
+## Optional timeline
+
+`analyze --timeline --json` or config `timeline = true` adds `timeline` without
+changing schema version 1. Disabled reports omit the key entirely, not `null`.
+Timeline requires `walk = "full"`; combining it with the legacy first-parent walk
+is an error, so ownership history never silently uses approximate merge credit.
+
+```json
+{
+  "timeline": {
+    "units": "millionths_of_line",
+    "activity": [
+      {
+        "week_start": "2020-01-06T00:00:00+00:00",
+        "commits": 2,
+        "total": 1500000,
+        "authors": [{"author": 0, "amount": 1500000}]
+      }
+    ],
+    "ownership": [
+      {
+        "commit": "0123456789012345678901234567890123456789",
+        "first_parent_index": 0,
+        "author_timestamp": "2020-01-07T12:00:00+00:00",
+        "total": 1000000,
+        "authors": [{"author": 0, "amount": 1000000}]
+      }
+    ]
+  }
+}
+```
+
+Activity uses UTC ISO weeks starting Monday at 00:00. The commit's **author time**
+reflects when work was written; committer time can change during rebases and merges.
+Every reachable commit counts once, including zero-labor commits. Empty weeks are
+omitted. Buckets are sorted by week start. Integer per-author sums equal the ledger
+exactly; divide by 1,000,000 to compare with the existing floating-point `labor`.
+
+Ownership is full-graph attribution sampled along HEAD's first-parent ancestry,
+not first-parent-only attribution. Its x axis is `first_parent_index`, counted from
+zero at the oldest first-parent ancestor. Author timestamps are UTC metadata and
+can go backwards. For chain length L, sample every max(1, ceil((L-1)/119)) commits,
+always including the first and HEAD: at most 120 samples, sorted by index. The last
+sample equals final report ownership in integer millionths.
+
+Each `author` is an index into this JSON object's sorted `authors` array, including
+its anonymous row, never a cache ID. Positive historical-only contributors remain
+in that array even when final ownership and labor are zero. Zero amounts are omitted.
+The final grouping, HEAD mailmap and opt-out mapping apply to every historical
+point, including aliases discovered later and authors no longer owning live code.
+No identity strings are repeated in the timeline. Integer amounts can exceed the
+exact range of JavaScript numbers; consumers needing exact arithmetic should use a
+JSON parser that preserves integer values rather than converting them to doubles.
+
+Cache format 3 retains only integer ownership summaries, not historical chart file
+maps. Ordered allocation fingerprints guard numeric-ID-sensitive rounding. Missing
+sample coverage (including a changed stride), invalid totals or identity reordering
+cause complete cold reconstruction rather than a shortened series. Timestamps are
+always read from commit objects and are not cached.

@@ -88,8 +88,41 @@ relative to cold replay, in exchange for supporting recent-fork merges. Deep
 forks, rewritten history, changed scoring policy or changed identity membership
 can require cold fallback; `-v` explains the reason. Newly interleaved branches
 can renumber author IDs without fallback because cached IDs are remapped through
-stable identity-group keys before validating per-commit shares.
+stable identity-group keys before validating per-commit shares. Timeline summaries
+are stricter: numeric identity reordering requires reconstruction because already
+rounded ownership totals cannot safely be remapped.
 
 Fuzzy token moves use at most 32 candidates per inserted block, each bounded to
 4096 tokens. Large blocks retain exact-move fallback. These conservative limits
 and the identity/cache design are documented in [PLAN.md](PLAN.md#phase-3-scale-done).
+
+## Optional timeline
+
+Measured on the same host and fd HEAD listed above, with release binaries on
+2026-11-09. Each entry is one serial invocation, using Bash wall-clock `time`,
+JSON redirected to disk, no execution of downloaded repository code or hooks.
+Cold is `--no-cache`. Separate caches were seeded for each mode; the original
+checkout was not changed. These are observations, not statistical guarantees.
+
+| fd run | Without timeline (s) | Activity plus ownership (s) | Overhead |
+| --- | ---: | ---: | ---: |
+| Cold HEAD, 2,118 commits | 8.023 | 8.374 | 4.4% |
+| Incremental from HEAD~1, 2 new commits | 0.579 | 0.594 | 2.6% |
+| HEAD~20 boundary, 52 new commits | 0.779 | 8.285 (cold fallback) | 963.5% |
+
+The HEAD~1 seed is `e5849a0` (2,116 reachable commits). Both modes report a real
+resume at that boundary. Fully cached and incremental timeline JSON compare
+byte-for-byte with cold JSON. The resulting timeline pack is 4,185,865 bytes,
+including 65 ordinary replay snapshots, below the 256 MiB cap.
+
+HEAD~20 introduces an earlier occurrence of an existing identity through a merged
+branch. The timeline allocation fingerprint correctly rejects those rounded
+summaries and reconstructs all 2,118 commits. This is required correctness fallback,
+not sampling overhead, and cannot meet the incremental overhead target for that
+boundary. Its output still matches cold exactly.
+
+Both-series overhead at the resumable boundary and on cold replay is below 15%
+and 35%. There is no public activity-only switch, so an independent activity-only
+process measurement was not taken. The measurements above include activity,
+ownership sampling, timestamp reads, privacy remapping and JSON serialization;
+no hotspot optimization was needed for these sampled runs.

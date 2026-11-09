@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `analyze --timeline` and config `timeline = true`: UTC weekly activity by
+  author time and full-graph ownership sampled along HEAD's first-parent ancestry.
+- Exact integer historical totals with report-local author references and final
+  alias/opt-out privacy mapping across every historical point.
+
+### Changed
+
+- Cache format 3 validates ownership summaries and ordered identity allocation;
+  missing samples or reordered rounding identities trigger complete reconstruction.
+
 ## [0.1.1] - 2026-11-09
 
 ### Added
