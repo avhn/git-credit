@@ -6,8 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
 ### Added
 
+- One-line installers: `install.sh` for macOS and Linux, `install.ps1` for Windows.
+  Both verify the release checksum and need no administrator rights.
+- Colored terminal table with inline ownership bars on a TTY (`--color`, `--bars`,
+  `--ascii`) and `analyze --tree` for per-directory ownership. Piped and JSON output
+  are unchanged.
+- Donut, labor-versus-ownership and directory treemap charts, mini bars on the
+  summary card, and a light and `-dark` file for every chart.
 - Paired light/dark activity and ownership-history SVG charts, with deterministic
   calendar axes, weekly gaps, monthly aggregation for long activity spans, shared
   contributor colors and privacy-filtered top-N legends.
@@ -141,6 +150,7 @@ All notable changes to this project are documented here. The format follows
   frequencies, prune provably inferior pairs, and index physical move prefixes.
   Scores and deterministic tie-breaking remain unchanged.
 
-[Unreleased]: https://github.com/avhn/git-credit/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/avhn/git-credit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/avhn/git-credit/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/avhn/git-credit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/avhn/git-credit/releases/tag/v0.1.0

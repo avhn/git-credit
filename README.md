@@ -103,12 +103,12 @@ The full rules are in the [usage reference](docs/usage.md#how-credit-is-decided)
 | Windows            | `irm https://raw.githubusercontent.com/avhn/git-credit/main/install.ps1 \| iex`             |
 | Homebrew           | `brew install avhn/tap/git-credit`                                                           |
 | Debian, Ubuntu     | signed APT repository, [see below](#apt)                                                     |
-| Rust toolchain     | `cargo install --git https://github.com/avhn/git-credit --tag v0.1.1 --locked git-credit`    |
+| Rust toolchain     | `cargo install --git https://github.com/avhn/git-credit --tag v0.2.0 --locked git-credit`    |
 
 The install scripts need no administrator rights: they download the latest release
 for your platform, verify it against the release's `SHA256SUMS`, and install to
 `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\git-credit`, added to your PATH).
-Set `GIT_CREDIT_VERSION=0.1.1` to pin a version or `GIT_CREDIT_INSTALL_DIR` to
+Set `GIT_CREDIT_VERSION=0.2.0` to pin a version or `GIT_CREDIT_INSTALL_DIR` to
 choose the location. Homebrew and APT add signed packages and `upgrade` support.
 
 Because the binary is named `git-credit`, Git also runs it as `git credit`.
@@ -252,7 +252,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: avhn/git-credit@v0.1.1
+      - uses: avhn/git-credit@v0.2.0
 ```
 
 Then reference them, for example
