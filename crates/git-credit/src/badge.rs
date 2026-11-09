@@ -131,6 +131,7 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             .with_context(|| format!("cannot read report {}", path.display()))?
     } else {
         let analysis = Analyze {
+            timeline: false,
             no_cache: args.no_cache,
             cache_dir: args.cache_dir.clone(),
             cache_depth: args.cache_depth,

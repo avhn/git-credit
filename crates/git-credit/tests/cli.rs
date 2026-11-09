@@ -1324,3 +1324,5 @@ fn terminal_tree_labels_repository_root_without_changing_json_path() {
     assert!(!text.contains("+- ."));
     assert_eq!(fixture.json(&[])["directories"][0]["path"], ".");
 }
+#[path = "support/timeline.rs"]
+mod timeline;

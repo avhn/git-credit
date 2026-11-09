@@ -2,6 +2,7 @@
 
 mod terminal;
 pub(crate) use terminal::{Terminal, render as terminal, warning};
+mod timeline;
 
 use crate::config::Settings;
 use credit_core::AuthorId;
@@ -26,6 +27,8 @@ pub(crate) fn plain(text: &str) -> String {
 /// Numeric author summary shared by both renderers.
 #[derive(Serialize)]
 struct AuthorRow<'a> {
+    #[serde(skip)]
+    id: AuthorId,
     name: &'a str,
     email: &'a str,
     emails: &'a [String],
@@ -72,6 +75,8 @@ struct JsonReport<'a> {
     authors: Vec<AuthorRow<'a>>,
     directories: Vec<DirectoryRow<'a>>,
     warnings: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeline: Option<timeline::Timeline<'a>>,
 }
 
 /// Build rows sorted by exact ownership, then display name and email.
@@ -86,7 +91,8 @@ fn rows(report: &Report) -> Vec<AuthorRow<'_>> {
             let owned = *report.ledger.ownership.get(&id).unwrap_or(&0);
             let labor = *report.ledger.labor.get(&id).unwrap_or(&0);
             // Formatting-only identities with no surviving work or labor add no data.
-            (owned != 0 || labor != 0).then_some((author, owned, labor))
+            (owned != 0 || labor != 0 || timeline::historical(report, id))
+                .then_some((author, owned, labor, id))
         })
         .collect();
     indexed.sort_by(|a, b| {
@@ -96,7 +102,8 @@ fn rows(report: &Report) -> Vec<AuthorRow<'_>> {
     });
     indexed
         .into_iter()
-        .map(|(author, owned, labor)| AuthorRow {
+        .map(|(author, owned, labor, id)| AuthorRow {
+            id,
             name: &author.name,
             email: &author.email,
             emails: &author.emails,
@@ -143,6 +150,8 @@ pub(crate) fn json(report: &Report, settings: &Settings) -> anyhow::Result<Strin
             }
         })
         .collect();
+    let authors = rows(report);
+    let timeline = timeline::build(report, &authors)?;
     Ok(serde_json::to_string_pretty(&JsonReport {
         schema_version: 1,
         algorithm_version: credit_core::ALGORITHM_VERSION,
@@ -164,7 +173,8 @@ pub(crate) fn json(report: &Report, settings: &Settings) -> anyhow::Result<Strin
         },
         commits_analyzed: report.commits_analyzed,
         formatting_commits: report.formatting_commits,
-        authors: rows(report),
+        authors,
+        timeline,
         directories,
         warnings: &report.warnings,
     })?)

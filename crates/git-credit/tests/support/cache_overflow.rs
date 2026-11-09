@@ -7,16 +7,25 @@ use sha2::{Digest, Sha256};
 
 use super::{Fixture, cache_matches_cold};
 
-/// Format-2 transport mirror: preserve every field while altering labor only.
+/// Format-3 transport mirror: preserve every field while altering selected totals.
 #[derive(Deserialize, Serialize)]
 struct Pack {
     key: String,
     identity_key: String,
+    allocation_key: String,
+    ownership: BTreeMap<String, Summary>,
     groups: BTreeMap<u32, String>,
     head: String,
     commits: BTreeMap<String, Commit>,
     snapshots: BTreeMap<String, BTreeMap<String, String>>,
     files: BTreeMap<String, Vec<u8>>,
+}
+
+/// Cached ownership in integer millionths, including its conserved total.
+#[derive(Deserialize, Serialize)]
+struct Summary {
+    total: u64,
+    authors: BTreeMap<u32, u64>,
 }
 
 /// Commit accounting in the cache's declared field order.
@@ -91,6 +100,33 @@ fn overflow_after_new_work_retries_once_without_poisoning_the_cache() {
             "Cache resumed replay failed: fixed-point credit total overflow; retrying cold",
         );
         cache_matches_cold(&fixture, &[], "replayed 0 new commits");
+    }
+}
+
+/// Semantic summary corruption must fall back even with a correct checksum.
+#[test]
+fn timeline_corrupt_or_missing_summaries_rebuild() {
+    let fixture = Fixture::token();
+    fixture.write("a.rs", "alpha beta\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.json(&["--timeline"]);
+    for kind in 0..5 {
+        alter_labor(&fixture, |pack| {
+            let summary = pack.ownership.values_mut().next().unwrap();
+            match kind {
+                0 => summary.total += 1,
+                1 => {
+                    summary.authors.insert(u32::MAX, 0);
+                }
+                2 => {
+                    summary.authors.insert(0, u64::MAX);
+                }
+                3 => pack.ownership.clear(),
+                _ => pack.allocation_key.clear(),
+            }
+        });
+        cache_matches_cold(&fixture, &["--timeline"], "Cache cold replay");
+        cache_matches_cold(&fixture, &["--timeline"], "replayed 0 new commits");
     }
 }
 
