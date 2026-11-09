@@ -1,267 +1,236 @@
 # git-credit
 
 [![CI](https://github.com/avhn/git-credit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/avhn/git-credit/actions/workflows/ci.yml)
-[![Dependency audit](https://github.com/avhn/git-credit/actions/workflows/audit.yml/badge.svg)](https://github.com/avhn/git-credit/actions/workflows/audit.yml)
+[![Release](https://img.shields.io/github/v/release/avhn/git-credit)](https://github.com/avhn/git-credit/releases/latest)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-Fair git authorship stats. `git-credit` reports how much of a repository each person
-wrote and how much work they put in, without letting a reformat, a renamed variable
-or a one-character fix take the credit away from the original author.
+**Fair git authorship stats.** `git-credit` shows who wrote how much of a repository
+and how much work each person put in, without letting a formatter run, a renamed
+variable or a one-character fix take the credit away from the original author.
 
-> **Status: v0.1.1.** All planned phases are complete. `analyze` defaults to token-level attribution and
-> merge-aware full-history replay. Reports stay in line-equivalent units. Use
-> `--granularity line` for the legacy line rules. These metrics describe provenance,
-> not a person's value.
+```sh
+curl -fsSL https://raw.githubusercontent.com/avhn/git-credit/main/install.sh | sh
+cd your-repo && git credit analyze
+```
 
-## Why
+## The problem
 
-`git blame` gives a whole line to whoever touched it last. Run a formatter over the
-codebase and one person "owns" everything; fix a typo and the line is yours. Tools
-built on blame inherit the problem, and work that was later rewritten or deleted
-disappears from the numbers entirely.
+`git blame` gives a whole line to whoever touched it last. Here is a small project
+with four commits:
 
-`git-credit` reports two separate metrics:
+1. **Alice** writes `src/cart.js`: cart totals, discounts and price formatting.
+2. **Bob** runs a code formatter over it (re-indents, wraps long lines, adds
+   trailing commas). No behavior changes.
+3. **Carol** fixes one discount value: `0.8` becomes `0.75`.
+4. **Dave** adds a new `shippingCost` function.
 
-| Metric        | Question it answers                                           | Changes when                                     |
-| ------------- | ------------------------------------------------------------- | ------------------------------------------------ |
-| **Ownership** | Who wrote the meaningful code that exists now?                | Code is genuinely rewritten or deleted           |
-| **Labor**     | Who did the meaningful work over the whole history?           | Never decreases because of someone else's edits  |
+Counting `git blame` lines per author (the approach most contribution tools use):
 
-Attribution rules:
+```console
+$ git blame --line-porcelain src/cart.js | sed -n 's/^author //p' | sort | uniq -c | sort -rn
+     16 Bob
+     10 Alice
+      8 Dave
+      1 Carol
+```
 
-- **Unchanged tokens keep their authors.** Only inserted and replaced tokens belong
-  to the editor. Changing one of ten equal-weight tokens earns 0.1 line of labor,
-  not ownership of the entire line. Every meaningful output line counts as one
-  ownership unit, divided by its tokens' weights.
-- **Formatting is free within the lexical rules.** Rewrapping, joining lines and
-  adding a trailing comma earn no labor. String contents remain meaningful, as
-  does indentation in Python and other indentation-sensitive files.
-- **Bulk renames preserve provenance.** A dominant replacement mapping repeated
-  at least five times retains token owners and earns one labor line per mapping
-  per file. Reports identify discounted commits; `--no-bulk-discount` disables it.
-- **Legacy line rules remain available.** `--granularity line` preserves the
-  configurable similarity threshold and Phase 2a ownership/labor numbers.
-- **Moved and renamed code keeps its author.**
-- **Merges preserve branch provenance.** Each reachable commit contributes labor
-  once; inherited parent content does not earn the merge author new labor.
-- **Identities merge** through `.mailmap`, and `Co-authored-by` trailers split credit.
-- **Noise is excluded:** lockfiles, generated and vendored code, binaries and
-  configurable paths.
+Bob "wrote" the most code by running a formatter, and Carol owns the whole
+discount line for changing two characters. The same repository with `git-credit`:
+
+```console
+$ git credit analyze
+AUTHOR  OWNERSHIP %  OWNED LINES  LABOR
+Alice         79.5%         23.9  17.0
+Dave          20.0%          6.0  6.0
+Carol          0.5%          0.1  0.1
+HEAD e5c6d840fbfd | 4 commits | full | token | algorithm 4
+Provenance metrics do not measure a person's value.
+```
+
+Bob's reformat earns nothing and takes nothing, so he does not appear. Alice keeps
+the code she wrote, Carol is credited with exactly the token she changed, and
+Dave owns his new function.
+
+## Two numbers per person
+
+| Column        | Question it answers                                      | Goes down when                          |
+| ------------- | -------------------------------------------------------- | --------------------------------------- |
+| **Ownership** | Who wrote the meaningful code that exists right now?     | Their code is genuinely rewritten or deleted |
+| **Labor**     | Who did the meaningful work across the whole history?    | Never, other people's edits cannot reduce it |
+
+Labor is measured in line-equivalents: a new line earns 1.0, changing one token of
+a ten-token line earns 0.1, deleting and formatting earn nothing.
+
+## What counts and what does not
+
+- **Formatting is free.** Re-indenting, rewrapping, joining lines and trailing
+  commas earn nothing and take nothing (indentation still counts in Python and YAML).
+- **Small edits take only what they change.** Credit is tracked per token, so a
+  fixed typo does not take over the line.
+- **Moved and renamed code keeps its author**, even when it is slightly edited
+  during the move.
+- **Find-and-replace renames keep their author.** The person running the rename
+  earns a small fixed amount of labor, not ownership of every touched line.
+- **Pull requests credit their authors, not whoever clicked merge.**
+- **One person, one row.** `.mailmap` is applied, identities with the same name are
+  merged, and `Co-authored-by:` trailers split credit.
+- **Noise is ignored:** lockfiles, vendored and generated code, minified files,
+  binaries.
+
+The full rules are in the [usage reference](docs/usage.md#how-credit-is-decided).
 
 ## Install
 
-### Homebrew (macOS and Linux)
+| Platform           | Command                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| macOS, Linux       | `curl -fsSL https://raw.githubusercontent.com/avhn/git-credit/main/install.sh \| sh`          |
+| Windows            | `irm https://raw.githubusercontent.com/avhn/git-credit/main/install.ps1 \| iex`             |
+| Homebrew           | `brew install avhn/tap/git-credit`                                                           |
+| Debian, Ubuntu     | signed APT repository, [see below](#apt)                                                     |
+| Rust toolchain     | `cargo install --git https://github.com/avhn/git-credit --tag v0.1.1 --locked git-credit`    |
+
+The install scripts need no administrator rights: they download the latest release
+for your platform, verify it against the release's `SHA256SUMS`, and install to
+`~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\git-credit`, added to your PATH).
+Set `GIT_CREDIT_VERSION=0.1.1` to pin a version or `GIT_CREDIT_INSTALL_DIR` to
+choose the location. Homebrew and APT add signed packages and `upgrade` support.
+
+Because the binary is named `git-credit`, Git also runs it as `git credit`.
+
+### APT
+
+Debian 11+ and Ubuntu 20.04+, amd64 and arm64:
 
 ```sh
-brew install avhn/tap/git-credit
-```
-
-### APT (Debian 11+ and Ubuntu 20.04+)
-
-Packages support amd64 and arm64. Install the repository prerequisites, download
-its public keyring, and verify the fingerprint against
-`097DDFE92CE4B0F4E204F434668F8E1D756456FD` before trusting it.
-The keyring must contain exactly one primary public key with that fingerprint:
-
-```sh
-sudo apt update && sudo apt install -y ca-certificates curl gnupg
-curl -fsSL https://avhn.github.io/git-credit/apt/git-credit-archive-keyring.gpg -o git-credit-archive-keyring.gpg
-gpg --show-keys --with-fingerprint git-credit-archive-keyring.gpg
-sudo install -m 0644 git-credit-archive-keyring.gpg /usr/share/keyrings/git-credit-archive-keyring.gpg
-echo 'deb [signed-by=/usr/share/keyrings/git-credit-archive-keyring.gpg] https://avhn.github.io/git-credit/apt stable main' | sudo tee /etc/apt/sources.list.d/git-credit.list
+curl -fsSL https://avhn.github.io/git-credit/apt/git-credit-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/git-credit-archive-keyring.gpg > /dev/null
+echo 'deb [signed-by=/usr/share/keyrings/git-credit-archive-keyring.gpg] https://avhn.github.io/git-credit/apt stable main' \
+  | sudo tee /etc/apt/sources.list.d/git-credit.list
 sudo apt update && sudo apt install git-credit
 ```
 
-### Direct Debian package or binary
-
-Download `git-credit_0.1.1-1_amd64.deb` (or `_arm64.deb`) and `SHA256SUMS` from the
-[release](https://github.com/avhn/git-credit/releases/tag/v0.1.1). From that download
-directory, verify the selected package and install it:
-
-```sh
-grep '  git-credit_0.1.1-1_amd64.deb$' SHA256SUMS | sha256sum -c -
-sudo apt install ./git-credit_0.1.1-1_amd64.deb
-```
-
-Prebuilt archives for Linux (x86_64, ARM64), macOS (Intel, Apple Silicon) and Windows
-(x86_64) remain attached to every [GitHub release](https://github.com/avhn/git-credit/releases)
-with `SHA256SUMS`. Verify the selected archive's hash, then extract and place
-`git-credit` (`git-credit.exe` on Windows) on your PATH. Linux archives use static
-musl binaries, not a host glibc dependency. Checksums detect corruption, not a
-compromised release account. See [packaging and signing](docs/packaging.md).
-
-### Build from source
-
-```console
-$ cargo install --git https://github.com/avhn/git-credit --tag v0.1.1 --locked git-credit
-```
+The repository signing key fingerprint is
+`097D DFE9 2CE4 B0F4 E204 F434 668F 8E1D 7564 56FD`
+(check with `gpg --show-keys /usr/share/keyrings/git-credit-archive-keyring.gpg`).
+Standalone `.deb` files and archives for every platform are attached to each
+[release](https://github.com/avhn/git-credit/releases/latest). Details:
+[packaging and signing](docs/packaging.md).
 
 ## Usage
 
 ```console
-$ cargo run --locked -- analyze .
-$ cargo run --locked -- analyze ../another-repository --json > credit.json
-$ cargo run --locked -- analyze . --granularity line --keep 0.80 --exclude 'generated/**' --depth 2
-$ cargo install --path crates/git-credit --locked
-$ git-credit analyze --quiet --no-color
+$ git credit analyze                         # table for the current repository
+$ git credit analyze ../other-repo           # any path, including bare repositories
+$ git credit analyze --json > credit.json    # machine-readable report
+$ git credit analyze --exclude 'docs/**'     # leave paths out
+$ git credit analyze --by-email              # do not merge people who share a name
+$ git credit badge --out-dir badges          # SVG badges and a summary card
 ```
 
-The table shows `AUTHOR`, `OWNERSHIP %`, `OWNED LINES` and `LABOR`, sorted by
-ownership descending. The footer identifies HEAD, commit count, walk mode, granularity and
-algorithm version. JSON adds per-directory ownership and the effective policy;
-see [the versioned contract](docs/json.md). Output is plain text, including when
-piped. `--quiet` suppresses warnings on stderr, while `-v` enables diagnostics.
-`NO_COLOR` and `--no-color` are respected because no color is emitted.
+The JSON report adds per-directory ownership, the policy used, and every email
+merged into each person:
 
-Only committed content is scored. Blank lines have zero weight. Shallow clones
-fail with a `git fetch --unshallow` hint; analysis never fetches or runs hooks.
-Bare repositories are supported. Symlinks, submodules, binaries and files over
-1 MiB are skipped; the file-size limit is configurable. This build supports
-SHA-1 repositories. Use `--first-parent` for the legacy chain-only analysis, which
-credits new branch content in merge diffs to the merge author and co-authors.
-Full mode matches exact blobs and inserted tokens (or normalized lines in line
-mode) from merge parents; unmatched content is merge-resolution work. The lexer
-is language-agnostic, not a syntax parser; quoted strings stop at physical line
-ends and tabs use eight-column indentation stops.
+```json
+{
+  "name": "Alice",
+  "email": "alice@example.com",
+  "emails": ["alice@example.com"],
+  "ownership_lines": 23.862068,
+  "ownership_share": 0.7954022666666667,
+  "labor": 17.0
+}
+```
 
-### Incremental replay
+The first run on a large repository replays the full history (tokio, about 4,000
+commits, takes about a minute). Results are cached inside `.git`, so later runs
+only process new commits: on [fd](https://github.com/sharkdp/fd), 52 new commits
+took 0.8 seconds instead of 7.8. Shallow clones are refused; run
+`git fetch --unshallow` first.
 
-Analysis caches replay state inside `.git/git-credit/cache/`, never the worktree.
-Subsequent runs score only new commits when the required parent snapshots survive.
-Cold and cached JSON are byte-identical. Use `--no-cache` to disable both reads and
-writes, `--cache-dir DIR` to override the location, or `--cache-depth N` to retain
-N first-parent ancestors in addition to HEAD (default 64). These flags also work
-with `badge`. `-v` explains cache hits, rebuilds and the 256 MiB size bound.
-
-Policy changes, history rewrites and merges forked beyond the retained depth cause
-safe cold fallback. Identity changes that alter co-author splitting also rebuild;
-current display identities and opt-out always apply. The cache contains historical
-provenance and must not be published as badge output. See [performance measurements](docs/PERFORMANCE.md).
-
-### Configuration
-
-Optional `.git-credit.toml` at the repository root:
+Optional settings live in `.git-credit.toml` at the repository root:
 
 ```toml
-walk = "full" # Use "first-parent" for legacy merge attribution.
-granularity = "token" # Use "line" for Phase 2a attribution.
-bulk_discount = true
-cache = true # Disable with false or --no-cache.
-keep = 0.70 # Used only with line granularity.
-group_by = "name" # Use "email" to keep different addresses separate.
 exclude = ["generated/**", "fixtures/**"]
-opt_out = ["private@example.test"]
-max_file_size = 1048576
+opt_out = ["private@example.com"]   # shown as one anonymous row
+group_by = "email"                  # keep people who share a name apart
 ```
 
-`--granularity` overrides config; `--no-bulk-discount` disables the configured
-discount. Explicit `--keep` requires line granularity and overrides config there.
-`--first-parent` overrides the configured walk. Repeated `--exclude` flags replace config
-exclusions; built-in lockfile, vendor, node_modules, dist, minified and source-map
-exclusions remain active. Thresholds are rounded to per-mille precision.
-`--depth` defaults to 1; zero disables directory reporting. Names are grouped by
-case-insensitive trimmed display name after mailmap resolution by default. The
-most frequently used email represents each group, and JSON lists all merged
-canonical addresses in `emails`. Use `--by-email` (overrides config) or
-`group_by = "email"` when distinct people share a name. Matching any merged address
-in `opt_out` anonymizes the entire group, including its earlier work, without
-changing percentages or exposing its other addresses.
-The committed HEAD `.mailmap` applies to all history, with configured
-`mailmap.blob` and `mailmap.file` overrides. Worktree `.mailmap` edits are ignored.
-Rename detection uses an isolated raw-object cache: staged/dirty attributes and
-configured diff drivers or text conversion do not affect attribution.
+Every flag, the configuration keys, identity handling and the cache are described
+in the [usage reference](docs/usage.md). The JSON shape is versioned and documented
+in [json.md](docs/json.md).
 
-Exit codes are 0 for success, 1 for analysis/configuration errors and 2 for invalid
-CLI usage. Badges and the reusable GitHub Action are described below.
+## Badges for your README
 
-## Badges
+`git credit badge` renders these from the same analysis. This repository's own,
+regenerated on every push:
 
 ![Contributions](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar.svg)
+
 ![Contribution summary](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg)
+
 ![Bus factor](https://raw.githubusercontent.com/avhn/git-credit/badges/bus-factor.svg)
 
-```console
-$ cargo run --locked -- badge . --out-dir .git-credit
-$ git-credit badge --from credit.json --out-dir .git-credit --style card --theme dark
+To keep them up to date in your own repository, add this workflow. It runs on every
+push to `main` and publishes the images to a `badges` branch:
+
+```yaml
+# .github/workflows/badges.yml
+name: Badges
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  badges:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: avhn/git-credit@v0.1.1
 ```
 
-The source-built dogfood workflow publishes these files to an orphan `badges`
-branch on main pushes. Images become available after its first successful run.
-The reusable GitHub Action verifies release checksums and can publish to the same
-kind of generated-only branch in other repositories. See [badge documentation](docs/badges.md)
-for workflow examples, all inputs, shields.io endpoints and privacy/retention notes.
-Opt-outs apply before rendering; imported reports must already be privacy-filtered.
-The generated `credit.json` also contains non-opted-out canonical email addresses.
+Then reference them, for example
+`![Contributions](https://raw.githubusercontent.com/OWNER/REPO/badges/credit-bar.svg)`.
+All action inputs, styles, themes, shields.io endpoints and privacy notes:
+[badges.md](docs/badges.md).
 
-## Prerequisites
+## Limits
 
-- Rust stable via [rustup](https://rustup.rs). `rust-toolchain.toml` selects the
-  channel and components; the minimum supported Rust version is the `rust-version`
-  in `Cargo.toml`.
-- Git, for development and fixture tests. The installed CLI reads repositories
-  through gix and does not require a Git executable.
+- These numbers describe **who wrote what**, not how valuable anyone's work is. A
+  one-line security fix can matter more than a thousand generated lines.
+- The tokenizer is language-agnostic, not a full parser. It handles most languages
+  well but does not understand every syntax.
+- Merging identities by name can merge two different people with the same name;
+  use `--by-email` or a `.mailmap` when that happens.
 
-## Setup and run
+## Development
 
 ```console
-$ git clone https://github.com/avhn/git-credit
-$ cd git-credit
-$ git config core.hooksPath .githooks   # commit message and formatting checks
-$ cargo run -- --help
+$ git clone https://github.com/avhn/git-credit && cd git-credit
+$ git config core.hooksPath .githooks    # commit message and formatting checks
+$ cargo test --workspace
+$ cargo lint                             # clippy with the CI flags
+$ cargo run -- analyze .
 ```
 
-## Commands
-
-| Command                                        | What it does                                        |
-| ---------------------------------------------- | --------------------------------------------------- |
-| `cargo build --workspace`                      | Build every crate                                   |
-| `make analyze REPO=.`                          | Analyze committed HEAD as a table                   |
-| `make json REPO=.`                             | Analyze committed HEAD as JSON                      |
-| `cargo test --workspace`                       | Run all tests                                       |
-| `cargo lint`                                   | Clippy with the same flags as CI (pedantic, deny)   |
-| `cargo fmt --all`                              | Format the code                                     |
-| `tools/check-text.sh`                          | Text policy: no en or em dashes, LF line endings    |
-| `tools/tests/check-commit-msg.test.sh`         | Tests for the commit message checker                |
-
-## Project layout
+Requires stable Rust via [rustup](https://rustup.rs) (`rust-toolchain.toml` selects
+it). Commits follow Conventional Commits (`type(scope): summary`). Architecture and
+design decisions: [PLAN.md](docs/PLAN.md); performance: [PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ```text
 crates/
-  credit-core/   pure attribution engine: normalization, diff, ownership and labor ledgers (no I/O)
-  credit-git/    repository access: history walk, renames, .mailmap, co-author trailers
-  credit-badge/  pure deterministic SVG badges, cards and shields.io endpoint JSON
-  git-credit/    the command-line binary
-docs/PLAN.md     architecture and roadmap
-tools/           repository policy scripts and their tests
+  credit-core/   attribution engine: tokens, diffs, ownership and labor (no I/O)
+  credit-git/    reads the repository: history, renames, .mailmap, co-authors, cache
+  credit-badge/  SVG badges, cards and shields.io endpoint JSON
+  git-credit/    the command-line tool
 ```
-
-## Roadmap
-
-| Phase | Scope                                                                                     | State       |
-| ----- | ----------------------------------------------------------------------------------------- | ----------- |
-| 0     | Workspace, CI on Linux, Windows and macOS, policy checks, licensing                       | Done        |
-| 1     | `analyze`: line-level ownership and labor, similarity threshold, formatting detection, renames, mailmap, co-authors, JSON | Done        |
-| 2     | Language-agnostic token attribution, merge-aware history, bulk-edit detection             | Done |
-| 3     | Incremental cache, fuzzy move detection, benchmarks                                       | Done     |
-| 4     | SVG badges and cards, shields.io endpoints, reusable GitHub Action and tagged binaries   | Done |
-
-Details and design decisions: [docs/PLAN.md](docs/PLAN.md).
-
-## Contributing
-
-Commits follow Conventional Commits (`type(scope): summary`, lowercase, no trailing
-period); the `commit-msg` hook in `.githooks/` and CI enforce it. Before pushing, run
-`cargo fmt --all`, `cargo lint` and `cargo test --workspace`.
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for
-inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual
-licensed as above, without any additional terms or conditions.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option. Unless you explicitly state otherwise,
+any contribution intentionally submitted for inclusion in the work by you, as
+defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.
