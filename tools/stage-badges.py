@@ -18,7 +18,7 @@ def stage(source, destination):
         raise ValueError("publication directory must be new and empty")
     required = ["credit.json", "bus-factor.json", "top-contributor.json"]
     files = [source / name for name in required]
-    chart_names = ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "bus-factor")
+    chart_names = ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "credit-activity", "credit-history", "bus-factor")
     files += [source / (name + suffix + ".svg")
               for name in chart_names for suffix in ("", "-dark")
               if (source / (name + suffix + ".svg")).exists()]

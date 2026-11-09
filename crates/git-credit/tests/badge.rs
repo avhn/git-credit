@@ -104,7 +104,7 @@ fn analyzes_same_policy_and_round_trips_report_without_stdout() {
         "opt_out = [\"hidden@example.test\"]\nexclude = [\"b.rs\"]\n",
     )
     .unwrap();
-    let analyzed = cli(repo.path(), &["analyze", "--json"]);
+    let analyzed = cli(repo.path(), &["analyze", "--timeline", "--json"]);
     assert!(analyzed.status.success());
     let output = tempfile::tempdir().unwrap();
     let result = cli(
@@ -310,6 +310,8 @@ fn new_chart_pairs_remove_stale_names_after_rename_opt_out_and_style_change() {
         "credit-donut",
         "credit-labor",
         "credit-treemap",
+        "credit-activity",
+        "credit-history",
         "bus-factor",
     ] {
         for suffix in ["", "-dark"] {
@@ -370,7 +372,7 @@ fn new_chart_pairs_remove_stale_names_after_rename_opt_out_and_style_change() {
     }
     assert!(output.path().join("credit-donut.svg").is_file());
     assert!(output.path().join("credit-donut-dark.svg").is_file());
-    for style in ["labor", "treemap"] {
+    for style in ["labor", "treemap", "activity", "history"] {
         assert!(
             cli(
                 repo.path(),
@@ -387,4 +389,85 @@ fn new_chart_pairs_remove_stale_names_after_rename_opt_out_and_style_change() {
         );
         assert!(!output.path().join("credit-donut.svg").exists());
     }
+}
+
+/// Imports without historical data yield valid no-data pairs; malformed references fail before writes.
+#[test]
+fn timeline_import_is_optional_and_validated_before_writing() {
+    let repo = fixture();
+    let source = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let report_path = source.path().join("report.json");
+    let analyzed = cli(repo.path(), &["analyze", "--json"]);
+    assert!(analyzed.status.success());
+    fs::write(&report_path, &analyzed.stdout).unwrap();
+    for style in ["activity", "history"] {
+        let result = cli(
+            repo.path(),
+            &[
+                "badge",
+                "--from",
+                report_path.to_str().unwrap(),
+                "--out-dir",
+                output.path().to_str().unwrap(),
+                "--style",
+                style,
+            ],
+        );
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        for suffix in ["", "-dark"] {
+            let chart =
+                fs::read_to_string(output.path().join(format!("credit-{style}{suffix}.svg")))
+                    .unwrap();
+            assert!(chart.contains("no data"));
+        }
+    }
+    let analyzed = cli(repo.path(), &["analyze", "--timeline", "--json"]);
+    assert!(analyzed.status.success());
+    let original: serde_json::Value = serde_json::from_slice(&analyzed.stdout).unwrap();
+    for mode in ["units", "reference", "total", "date", "order"] {
+        let mut report = original.clone();
+        match mode {
+            "units" => report["timeline"]["units"] = serde_json::json!("lines"),
+            "reference" => {
+                report["timeline"]["activity"][0]["authors"][0]["author"] = serde_json::json!(9999);
+            }
+            "total" => report["timeline"]["activity"][0]["total"] = serde_json::json!(0),
+            "date" => {
+                report["timeline"]["ownership"][0]["author_timestamp"] =
+                    serde_json::json!("2020-02-30");
+            }
+            _ => report["timeline"]["ownership"][1]["first_parent_index"] = serde_json::json!(0),
+        }
+        fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+        let target = output.path().join(mode);
+        let result = cli(
+            repo.path(),
+            &[
+                "badge",
+                "--from",
+                report_path.to_str().unwrap(),
+                "--out-dir",
+                target.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(result.status.code(), Some(1), "{mode}");
+        assert!(!target.exists(), "{mode}");
+    }
+}
+
+/// Enabling timeline must not alter nonterminal tables or introduce a sparkline into pipes.
+#[test]
+fn timeline_piped_tables_keep_existing_bytes() {
+    let repo = fixture();
+    let plain = cli(repo.path(), &["analyze"]);
+    let timeline = cli(repo.path(), &["analyze", "--timeline"]);
+    assert!(plain.status.success());
+    assert!(timeline.status.success());
+    assert_eq!(plain.stdout, timeline.stdout);
+    assert!(!String::from_utf8_lossy(&timeline.stdout).contains("Activity"));
 }

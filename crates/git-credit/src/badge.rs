@@ -23,6 +23,10 @@ enum Style {
     Labor,
     /// Flat directory ownership treemap.
     Treemap,
+    /// Weekly meaningful labor, aggregated monthly for long histories.
+    Activity,
+    /// Absolute ownership sampled along the main line of history.
+    History,
     /// Strict-majority bus-factor flat badge.
     BusFactor,
     /// One safely named flat badge per top contributor.
@@ -94,6 +98,83 @@ struct Imported {
     authors: Vec<ImportedAuthor>,
     #[serde(default)]
     directories: Vec<ImportedDirectory>,
+    #[serde(default)]
+    timeline: Option<ImportedTimeline>,
+}
+
+/// Exact timeline amounts retain report-local author indices through rendering.
+#[derive(Deserialize)]
+struct ImportedTimeline {
+    units: String,
+    activity: Vec<ImportedActivity>,
+    ownership: Vec<ImportedOwnership>,
+}
+
+/// Weekly integer labor; commit counts remain preserved in the source report.
+#[derive(Deserialize)]
+struct ImportedActivity {
+    week_start: String,
+    total: u64,
+    authors: Vec<ImportedAmount>,
+}
+
+/// Ownership sample dates are metadata, not a sortable time axis.
+#[derive(Deserialize)]
+struct ImportedOwnership {
+    first_parent_index: usize,
+    author_timestamp: String,
+    total: u64,
+    authors: Vec<ImportedAmount>,
+}
+
+/// A reference to the supplied, already privacy-filtered authors table.
+#[derive(Deserialize)]
+struct ImportedAmount {
+    author: usize,
+    amount: u64,
+}
+
+impl From<ImportedAmount> for credit_badge::Amount {
+    /// Preserve the exact fixed-point amount and original author index.
+    fn from(value: ImportedAmount) -> Self {
+        Self {
+            author: value.author,
+            amount: value.amount,
+        }
+    }
+}
+
+impl ImportedTimeline {
+    /// Reject unknown units rather than rendering millionths as whole lines.
+    fn presentation(self) -> anyhow::Result<credit_badge::Timeline> {
+        if self.units != "millionths_of_line" {
+            bail!(
+                "unsupported timeline units {}; expected millionths_of_line",
+                self.units
+            );
+        }
+        Ok(credit_badge::Timeline {
+            activity: self
+                .activity
+                .into_iter()
+                .map(|week| credit_badge::Activity {
+                    week_start: week.week_start,
+                    total: week.total,
+                    authors: week.authors.into_iter().map(Into::into).collect(),
+                })
+                .collect(),
+            ownership: self
+                .ownership
+                .into_iter()
+                .map(|sample| credit_badge::Ownership {
+                    first_parent_index: sample.first_parent_index,
+                    author_timestamp: sample.author_timestamp,
+                    total: sample.total,
+                    authors: sample.authors.into_iter().map(Into::into).collect(),
+                })
+                .collect(),
+        })
+    }
 }
 
 /// Numeric presentation fields; identities have already been filtered by analysis.
@@ -131,7 +212,7 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             .with_context(|| format!("cannot read report {}", path.display()))?
     } else {
         let analysis = Analyze {
-            timeline: false,
+            timeline: matches!(args.style, Style::Activity | Style::History | Style::All),
             no_cache: args.no_cache,
             cache_dir: args.cache_dir.clone(),
             cache_depth: args.cache_depth,
@@ -191,6 +272,8 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             (Style::Donut, "credit-donut", assets.donut),
             (Style::Labor, "credit-labor", assets.labor),
             (Style::Treemap, "credit-treemap", assets.treemap),
+            (Style::Activity, "credit-activity", assets.activity),
+            (Style::History, "credit-history", assets.history),
             (Style::BusFactor, "bus-factor", assets.bus_factor),
         ] {
             if args.style == style || args.style == Style::All {
@@ -258,6 +341,10 @@ fn import(source: &str) -> anyhow::Result<Report> {
         head: report.head,
         total_lines,
         directories,
+        timeline: report
+            .timeline
+            .map(ImportedTimeline::presentation)
+            .transpose()?,
     })
 }
 
@@ -307,6 +394,10 @@ fn write_files(out: &Path, files: &[(PathBuf, String)], verbose: bool) -> anyhow
         "credit-labor-dark.svg",
         "credit-treemap.svg",
         "credit-treemap-dark.svg",
+        "credit-activity.svg",
+        "credit-activity-dark.svg",
+        "credit-history.svg",
+        "credit-history-dark.svg",
     ]
     .iter()
     .map(|name| out.join(name))

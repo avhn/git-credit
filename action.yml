@@ -20,7 +20,7 @@ inputs:
     description: Generated asset directory relative to the checkout
     default: .git-credit
   styles:
-    description: SVG selection (bar, card, donut, labor, treemap, bus-factor, authors or all; light/dark pairs)
+    description: SVG selection (bar, card, donut, labor, treemap, activity, history, bus-factor, authors or all; light/dark pairs)
     default: all
   top:
     description: Maximum named contributors (1 through 1000)

@@ -26,7 +26,7 @@ enum Command {
 #[derive(Debug, clap::Args)]
 #[allow(clippy::struct_excessive_bools)] // Independent clap switches, not mutually exclusive application states.
 struct Analyze {
-    /// Include weekly activity and first-parent ownership history in JSON.
+    /// Include timeline JSON or a weekly activity sparkline below TTY tables.
     #[arg(long)]
     timeline: bool,
     /// Disable reading and writing the incremental replay cache.

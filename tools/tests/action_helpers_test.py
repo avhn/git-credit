@@ -287,7 +287,7 @@ class ChartStaging(unittest.TestCase):
             destination.mkdir()
             names = {"credit.json", "bus-factor.json", "top-contributor.json"}
             names.update(name + suffix + ".svg"
-                         for name in ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "bus-factor")
+                         for name in ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "credit-activity", "credit-history", "bus-factor")
                          for suffix in ("", "-dark"))
             for name in names:
                 (source / name).write_text(name)

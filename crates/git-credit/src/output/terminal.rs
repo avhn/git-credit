@@ -42,11 +42,13 @@ pub(crate) struct Terminal {
 
 /// Resolved environment, injectable for deterministic tests without global mutation.
 #[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // Independent resolved presentation capabilities, not application states.
 struct Display {
     color: bool,
     bars: bool,
     ascii: bool,
     columns: usize,
+    tty: bool,
 }
 
 impl Terminal {
@@ -71,6 +73,7 @@ impl Terminal {
                 },
             bars: !self.no_bars && (self.bars || tty),
             ascii,
+            tty,
             columns: std::env::var("COLUMNS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -113,7 +116,29 @@ pub(crate) fn render(report: &Report, options: &Terminal) -> String {
     if options.tree {
         tree(report, display)
     } else {
-        table(report, display)
+        let mut out = table(report, display);
+        append_activity(&mut out, report, display);
+        out
+    }
+}
+
+/// Add activity only for a TTY table with timeline analysis explicitly enabled.
+fn append_activity(out: &mut String, report: &Report, display: Display) {
+    if !display.tty {
+        return;
+    }
+    if let Some(timeline) = &report.timeline {
+        let weeks: Vec<_> = timeline
+            .activity
+            .iter()
+            .map(|week| (week.week_start.as_str(), week.total))
+            .collect();
+        if let Ok(sparkline) =
+            credit_badge::activity_sparkline(&weeks, display.ascii, display.columns)
+        {
+            out.push('\n');
+            out.push_str(&sparkline);
+        }
     }
 }
 
@@ -247,5 +272,56 @@ mod tests {
         assert!(!clean.contains('\u{202e}'));
         assert_eq!(author_color(&clean, 0, true), author_color(&clean, 0, true));
         assert_eq!(styled(&clean, "1", false), clean);
+    }
+
+    /// Inject TTY capabilities so sparkline gating does not depend on the test runner.
+    #[test]
+    fn activity_requires_timeline_and_a_tty() {
+        let mut report = Report {
+            timeline: None,
+            cache_diagnostics: Vec::new(),
+            granularity: credit_git::Granularity::Token,
+            bulk_edit_commits: 0,
+            walk: credit_git::Walk::Full,
+            peak_retained_states: 0,
+            head: "a".repeat(40),
+            commits_analyzed: 1,
+            formatting_commits: 0,
+            authors: Vec::new(),
+            ledger: credit_core::Ledger::default(),
+            directories: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let mut display = Display {
+            color: false,
+            bars: false,
+            ascii: true,
+            columns: 80,
+            tty: true,
+        };
+        let mut out = "table".to_owned();
+        append_activity(&mut out, &report, display);
+        assert_eq!(out, "table");
+        report.timeline = Some(credit_git::Timeline {
+            activity: vec![credit_git::ActivityBucket {
+                week_start: "2020-01-06T00:00:00+00:00".into(),
+                commits: 1,
+                total: 2_000_000,
+                authors: credit_core::LaborDelta::default(),
+            }],
+            ownership: Vec::new(),
+        });
+        display.tty = false;
+        append_activity(&mut out, &report, display);
+        assert_eq!(out, "table");
+        display.tty = true;
+        append_activity(&mut out, &report, display);
+        assert!(out.starts_with("table\nActivity"));
+        assert!(out.ends_with('@'));
+        assert!(out.is_ascii());
+        display.ascii = false;
+        out.clear();
+        append_activity(&mut out, &report, display);
+        assert!(out.ends_with('█'));
     }
 }
