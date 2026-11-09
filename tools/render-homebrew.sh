@@ -36,7 +36,6 @@ cat >"${STAGING}/Formula/git-credit.rb" <<EOF
 class GitCredit < Formula
   desc "Fair git authorship stats"
   homepage "https://github.com/avhn/git-credit"
-  version "${VERSION}"
   license any_of: ["MIT", "Apache-2.0"]
 
   on_macos do

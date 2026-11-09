@@ -51,6 +51,8 @@ class Packaging(unittest.TestCase):
         for fragment in ('license any_of: ["MIT", "Apache-2.0"]', 'bin.install "git-credit"',
                          'assert_match version.to_s, shell_output("#{bin}/git-credit --version")'):
             self.assertIn(fragment, text)
+        # `brew audit --strict` rejects an explicit version that the URL already implies.
+        self.assertNotRegex(text, r'(?m)^\s*version "')
         if shutil.which("ruby"):
             result = subprocess.run(["ruby", "-c", str(formula)], cwd=ROOT,
                                     capture_output=True, text=True, timeout=30)
