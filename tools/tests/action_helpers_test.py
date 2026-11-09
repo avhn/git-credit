@@ -97,6 +97,52 @@ class Helpers(unittest.TestCase):
                 VERIFY.verify(archive, checksums, self.destination, executable)
         self.assertEqual(list(self.destination.iterdir()), [])
 
+    def test_publication_provenance_rejects_replaced_release_manifest_and_payload(self):
+        """Trust the publish-job artifact even if release assets and their manifest agree."""
+        downloaded = self.root / "release-assets"
+        downloaded.mkdir()
+        asset = downloaded / "git-credit_0.1.1-1_amd64.deb"
+        asset.write_bytes(b"built bytes")
+        manifest = downloaded / "SHA256SUMS"
+        manifest.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+        trusted = self.root / "trusted-SHA256SUMS"
+        trusted.write_bytes(manifest.read_bytes())
+        VERIFY.provenance(trusted, downloaded, [asset.name])
+        asset.write_bytes(b"replaced release bytes")
+        with self.assertRaisesRegex(ValueError, "release checksum mismatch"):
+            VERIFY.provenance(trusted, downloaded, [asset.name])
+        manifest.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+        with self.assertRaisesRegex(ValueError, "differs from the publish job artifact"):
+            VERIFY.provenance(trusted, downloaded, [asset.name])
+        manifest.write_bytes(trusted.read_bytes())
+        with self.assertRaisesRegex(ValueError, "asset set"):
+            VERIFY.provenance(trusted, downloaded, [asset.name, "missing.deb"])
+
+    def test_linux_assets_prefer_musl_and_fall_back_to_legacy_gnu(self):
+        """Manifest selection never downgrades a malformed musl entry to a GNU download."""
+        sums = self.root / "SHA256SUMS"
+        for arch in ("x86_64", "aarch64"):
+            target = arch + "-unknown-linux-musl"
+            musl = "git-credit-" + target + ".tar.gz"
+            gnu = musl.replace("-musl", "-gnu")
+            legacy = "a" * 64 + "  " + gnu + "\n"
+            modern = "b" * 64 + "  " + musl + "\n"
+            for manifest, expected in ((legacy, gnu), (modern, musl), (legacy + modern, musl), ("\n" + legacy + "\n" + modern, musl)):
+                sums.write_text(manifest)
+                self.assertEqual(VERIFY.select_asset(sums, target), expected)
+            for manifest in (legacy + modern + modern, legacy + modern.replace("b" * 64, "invalid"),
+                             legacy + modern.rstrip() + " extra\n"):
+                sums.write_text(manifest)
+                with self.assertRaisesRegex(ValueError, "invalid or duplicate"):
+                    VERIFY.select_asset(sums, target)
+            sums.write_text("")
+            with self.assertRaisesRegex(ValueError, "no release asset"):
+                VERIFY.select_asset(sums, target)
+        for target, extension in (("aarch64-apple-darwin", ".tar.gz"), ("x86_64-pc-windows-msvc", ".zip")):
+            name = "git-credit-" + target + extension
+            sums.write_text("a" * 64 + "  " + name + "\n")
+            self.assertEqual(VERIFY.select_asset(sums, target), name)
+
     def test_stage_copies_only_known_regular_assets(self):
         """Do not publish source, dotfiles, arbitrary SVGs or unsafe author paths."""
         source = self.root / "assets"
@@ -138,7 +184,7 @@ class Helpers(unittest.TestCase):
         os.chdir(self.root)
         for name in ("LICENSE-APACHE", "LICENSE-MIT", "README.md"):
             pathlib.Path(name).write_text(name)
-        for target in ("x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"):
+        for target in ("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc"):
             executable = "git-credit.exe" if "windows" in target else "git-credit"
             binary = pathlib.Path("target") / target / "release" / executable
             binary.parent.mkdir(parents=True)

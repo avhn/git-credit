@@ -1,0 +1,3 @@
+# Static musl intentionally avoids host glibc dependencies on older distributions.
+# The package contains exactly one executable, /usr/bin/git-credit.
+git-credit: statically-linked-binary
