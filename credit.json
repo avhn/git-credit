@@ -1,0 +1,707 @@
+{
+  "schema_version": 1,
+  "algorithm_version": 4,
+  "head": "e0320f0ff02d8265bc31f17813409ad78e9b58d0",
+  "walk": "full",
+  "units": "lines",
+  "granularity": "token",
+  "bulk_edit_commits": 0,
+  "policy": {
+    "bulk_discount": true,
+    "keep": 0.7,
+    "group_by": "name",
+    "exclude": [
+      "**/*.map",
+      "**/*.min.css",
+      "**/*.min.js",
+      "**/Cargo.lock",
+      "**/Gemfile.lock",
+      "**/bun.lockb",
+      "**/composer.lock",
+      "**/dist/**",
+      "**/go.sum",
+      "**/node_modules/**",
+      "**/package-lock.json",
+      "**/pnpm-lock.yaml",
+      "**/poetry.lock",
+      "**/uv.lock",
+      "**/vendor/**",
+      "**/yarn.lock"
+    ],
+    "max_file_size": 1048576
+  },
+  "commits_analyzed": 45,
+  "formatting_commits": 0,
+  "authors": [
+    {
+      "name": "Mert Dede",
+      "email": "doganmertdede@gmail.com",
+      "emails": [
+        "doganmertdede@gmail.com"
+      ],
+      "ownership_lines": 16703.0,
+      "ownership_share": 1.0,
+      "labor": 17120.028083
+    }
+  ],
+  "directories": [
+    {
+      "path": ".",
+      "total_lines": 980.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 980.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": ".cargo",
+      "total_lines": 4.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 4.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": ".githooks",
+      "total_lines": 8.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 8.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": ".github",
+      "total_lines": 823.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 823.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": "crates",
+      "total_lines": 11900.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 11900.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": "docs",
+      "total_lines": 1383.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 1383.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": "packaging",
+      "total_lines": 31.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 31.0,
+          "share": 1.0
+        }
+      ]
+    },
+    {
+      "path": "tools",
+      "total_lines": 1574.0,
+      "authors": [
+        {
+          "email": "doganmertdede@gmail.com",
+          "lines": 1574.0,
+          "share": 1.0
+        }
+      ]
+    }
+  ],
+  "warnings": [],
+  "timeline": {
+    "units": "millionths_of_line",
+    "activity": [
+      {
+        "week_start": "2026-11-02T00:00:00+00:00",
+        "commits": 27,
+        "total": 11378844671,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 11378844671
+          }
+        ]
+      },
+      {
+        "week_start": "2026-11-09T00:00:00+00:00",
+        "commits": 18,
+        "total": 5741183412,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 5741183412
+          }
+        ]
+      }
+    ],
+    "ownership": [
+      {
+        "commit": "ab495081ccc523474cf08ca4bf1ecac593063abf",
+        "first_parent_index": 0,
+        "author_timestamp": "2026-11-08T18:21:45+00:00",
+        "total": 450000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 450000000
+          }
+        ]
+      },
+      {
+        "commit": "c8412e602a6dae26e7d51f7c74e62c259ece094f",
+        "first_parent_index": 1,
+        "author_timestamp": "2026-11-08T18:21:46+00:00",
+        "total": 570000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 570000000
+          }
+        ]
+      },
+      {
+        "commit": "0266b23bf21eb0b957e95978f7606c078cc8d701",
+        "first_parent_index": 2,
+        "author_timestamp": "2026-11-08T18:21:48+00:00",
+        "total": 779000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 779000000
+          }
+        ]
+      },
+      {
+        "commit": "7284cac2e8d8dfad9418778315a28b7c23c22dc4",
+        "first_parent_index": 3,
+        "author_timestamp": "2026-11-08T18:21:49+00:00",
+        "total": 1066000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 1066000000
+          }
+        ]
+      },
+      {
+        "commit": "a382a42ec1d96c5297fe5b0f462f387ec6bc98e2",
+        "first_parent_index": 4,
+        "author_timestamp": "2026-11-08T18:46:23+00:00",
+        "total": 1947000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 1947000000
+          }
+        ]
+      },
+      {
+        "commit": "b6f35583a094c4fcd05e90ea62cfe568a94fcbb6",
+        "first_parent_index": 5,
+        "author_timestamp": "2026-11-08T20:05:36+00:00",
+        "total": 2229000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 2229000000
+          }
+        ]
+      },
+      {
+        "commit": "36bec6b8ad486836fee2947535349e9e0b12f3bb",
+        "first_parent_index": 6,
+        "author_timestamp": "2026-11-08T20:05:38+00:00",
+        "total": 2956000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 2956000000
+          }
+        ]
+      },
+      {
+        "commit": "c60e99dd1136144bc38fed1625aeb3b62168e44f",
+        "first_parent_index": 7,
+        "author_timestamp": "2026-11-08T20:05:40+00:00",
+        "total": 3903000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 3903000000
+          }
+        ]
+      },
+      {
+        "commit": "5fa3da5e4562077a3db4ab62409ae0f44d19debb",
+        "first_parent_index": 8,
+        "author_timestamp": "2026-11-08T20:05:42+00:00",
+        "total": 4128000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 4128000000
+          }
+        ]
+      },
+      {
+        "commit": "9c5ea4db1888f3fd1113775e84bd54a997ea411c",
+        "first_parent_index": 9,
+        "author_timestamp": "2026-11-08T20:31:04+00:00",
+        "total": 4373000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 4373000000
+          }
+        ]
+      },
+      {
+        "commit": "c8467611cf345e28b1f135c2c1d625ebe68c4fc8",
+        "first_parent_index": 10,
+        "author_timestamp": "2026-11-08T20:31:06+00:00",
+        "total": 4997000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 4997000000
+          }
+        ]
+      },
+      {
+        "commit": "2b0e14c3140a05e820ff7a6516deec33b6c5e912",
+        "first_parent_index": 11,
+        "author_timestamp": "2026-11-08T20:31:08+00:00",
+        "total": 5050000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 5050000000
+          }
+        ]
+      },
+      {
+        "commit": "9b8d5a93e23ebff1556e9743e23725d7de39ccd2",
+        "first_parent_index": 12,
+        "author_timestamp": "2026-11-08T20:48:23+00:00",
+        "total": 5895000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 5895000000
+          }
+        ]
+      },
+      {
+        "commit": "37a1199755e4bbf495651168b06f97a5ac20b156",
+        "first_parent_index": 13,
+        "author_timestamp": "2026-11-08T21:41:54+00:00",
+        "total": 6759000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 6759000000
+          }
+        ]
+      },
+      {
+        "commit": "99118f208245ce745286fd6b9156d520d41a5046",
+        "first_parent_index": 14,
+        "author_timestamp": "2026-11-08T21:41:57+00:00",
+        "total": 7168000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 7168000000
+          }
+        ]
+      },
+      {
+        "commit": "fa37f5fd7a6a4e6a019e0f6b92900d51b4714ea8",
+        "first_parent_index": 15,
+        "author_timestamp": "2026-11-08T21:41:59+00:00",
+        "total": 7347000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 7347000000
+          }
+        ]
+      },
+      {
+        "commit": "5dd0009339ff0c257421511431f9efc62c3088aa",
+        "first_parent_index": 16,
+        "author_timestamp": "2026-11-08T21:06:04+00:00",
+        "total": 8079000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 8079000000
+          }
+        ]
+      },
+      {
+        "commit": "d26c1de018b0b9b05c19849e4c979b5dd67666ad",
+        "first_parent_index": 17,
+        "author_timestamp": "2026-11-08T21:06:06+00:00",
+        "total": 8608000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 8608000000
+          }
+        ]
+      },
+      {
+        "commit": "83f197a385d687e14fbad3e310d9b078100de25b",
+        "first_parent_index": 18,
+        "author_timestamp": "2026-11-08T21:06:08+00:00",
+        "total": 9355000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 9355000000
+          }
+        ]
+      },
+      {
+        "commit": "ebeb548101107a7d39e18afb942f21167eba11f8",
+        "first_parent_index": 19,
+        "author_timestamp": "2026-11-08T21:06:11+00:00",
+        "total": 9557000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 9557000000
+          }
+        ]
+      },
+      {
+        "commit": "659a1e3d064e43548854d9c1d5fe9cd62541d9e3",
+        "first_parent_index": 20,
+        "author_timestamp": "2026-11-08T21:43:34+00:00",
+        "total": 9559000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 9559000000
+          }
+        ]
+      },
+      {
+        "commit": "4ee88e7c573fd9cee4cec3fec41d4fb175dd41df",
+        "first_parent_index": 21,
+        "author_timestamp": "2026-11-08T21:47:02+00:00",
+        "total": 9582000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 9582000000
+          }
+        ]
+      },
+      {
+        "commit": "64324a14749ac5c9f3d481ea6178d667b26d0e5c",
+        "first_parent_index": 22,
+        "author_timestamp": "2026-11-08T22:30:41+00:00",
+        "total": 9930000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 9930000000
+          }
+        ]
+      },
+      {
+        "commit": "c54b5a94716acca47a47b3ad234466670785c764",
+        "first_parent_index": 23,
+        "author_timestamp": "2026-11-08T22:30:44+00:00",
+        "total": 10912000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 10912000000
+          }
+        ]
+      },
+      {
+        "commit": "d770df0e522b0e5710497e3563721c9cb5c4c8b9",
+        "first_parent_index": 24,
+        "author_timestamp": "2026-11-08T22:30:47+00:00",
+        "total": 10936000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 10936000000
+          }
+        ]
+      },
+      {
+        "commit": "1f21dd1cad253c52bc9be6c7b770e9985a7ff7b1",
+        "first_parent_index": 25,
+        "author_timestamp": "2026-11-08T22:30:49+00:00",
+        "total": 11133000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 11133000000
+          }
+        ]
+      },
+      {
+        "commit": "4b99d75dab47ebc9cd5737f751dfeb20d9057b20",
+        "first_parent_index": 26,
+        "author_timestamp": "2026-11-08T22:34:00+00:00",
+        "total": 11143000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 11143000000
+          }
+        ]
+      },
+      {
+        "commit": "c4c3a2cf65ff4656cae1fbfb90c0f76974cf70cd",
+        "first_parent_index": 27,
+        "author_timestamp": "2026-11-09T01:52:39+00:00",
+        "total": 12163000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 12163000000
+          }
+        ]
+      },
+      {
+        "commit": "19697b57a7024368cda980bfcfdd8070ead22a36",
+        "first_parent_index": 28,
+        "author_timestamp": "2026-11-09T01:52:42+00:00",
+        "total": 12482000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 12482000000
+          }
+        ]
+      },
+      {
+        "commit": "f0c12741e6a0473cf8e0a44194823748d316885a",
+        "first_parent_index": 29,
+        "author_timestamp": "2026-11-09T01:52:45+00:00",
+        "total": 12726000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 12726000000
+          }
+        ]
+      },
+      {
+        "commit": "f831eb28ec29bea0daf1d1aa372520498eee4bbf",
+        "first_parent_index": 30,
+        "author_timestamp": "2026-11-09T02:01:25+00:00",
+        "total": 12727000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 12727000000
+          }
+        ]
+      },
+      {
+        "commit": "80c0c3f31dcd288da688279d74d7b12085b52572",
+        "first_parent_index": 31,
+        "author_timestamp": "2026-11-09T03:38:54+00:00",
+        "total": 12950000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 12950000000
+          }
+        ]
+      },
+      {
+        "commit": "2044ad2d265f082cf95430055403560954effb9c",
+        "first_parent_index": 32,
+        "author_timestamp": "2026-11-09T03:38:57+00:00",
+        "total": 13047000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 13047000000
+          }
+        ]
+      },
+      {
+        "commit": "0260ae3da1a50af8fb11204c128659d7d2942c02",
+        "first_parent_index": 33,
+        "author_timestamp": "2026-11-09T04:22:11+00:00",
+        "total": 13835000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 13835000000
+          }
+        ]
+      },
+      {
+        "commit": "430cf29c746b13d9e87c6a978992aef8033d4ea1",
+        "first_parent_index": 34,
+        "author_timestamp": "2026-11-09T04:22:14+00:00",
+        "total": 14317000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 14317000000
+          }
+        ]
+      },
+      {
+        "commit": "487e5cb29d3b1ffe626ddc029f68915b720ab4aa",
+        "first_parent_index": 35,
+        "author_timestamp": "2026-11-09T04:22:18+00:00",
+        "total": 14449000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 14449000000
+          }
+        ]
+      },
+      {
+        "commit": "4d93a88ed838b3e2c87a3fa92631e2a7de6ef37a",
+        "first_parent_index": 36,
+        "author_timestamp": "2026-11-09T04:31:23+00:00",
+        "total": 14801000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 14801000000
+          }
+        ]
+      },
+      {
+        "commit": "ea21c198aaaa7e2ccaa538a6a53d0f376c20349f",
+        "first_parent_index": 37,
+        "author_timestamp": "2026-11-09T04:31:26+00:00",
+        "total": 15222000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 15222000000
+          }
+        ]
+      },
+      {
+        "commit": "bbbdda4b95cbbf4ca260ccbd3c4faa7562087b8a",
+        "first_parent_index": 38,
+        "author_timestamp": "2026-11-09T04:31:30+00:00",
+        "total": 15352000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 15352000000
+          }
+        ]
+      },
+      {
+        "commit": "81bd3656cf8a91e762e80307fd3f5000dba61460",
+        "first_parent_index": 39,
+        "author_timestamp": "2026-11-09T05:00:17+00:00",
+        "total": 16389000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16389000000
+          }
+        ]
+      },
+      {
+        "commit": "ecbe492d614add9e3450541440fc5f3589593aba",
+        "first_parent_index": 40,
+        "author_timestamp": "2026-11-09T05:00:21+00:00",
+        "total": 16629000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16629000000
+          }
+        ]
+      },
+      {
+        "commit": "89442c4dcd9070e59af9d7351fd8f7e1f56f4c3d",
+        "first_parent_index": 41,
+        "author_timestamp": "2026-11-09T05:00:25+00:00",
+        "total": 16688000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16688000000
+          }
+        ]
+      },
+      {
+        "commit": "3c212b32bb8ac11ee216ed8e8aab8a2bbd3f9615",
+        "first_parent_index": 42,
+        "author_timestamp": "2026-11-09T08:12:45+00:00",
+        "total": 16697000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16697000000
+          }
+        ]
+      },
+      {
+        "commit": "5a1f0ac208b280a7f0c5aeb248f110e5dd44e3e1",
+        "first_parent_index": 43,
+        "author_timestamp": "2026-11-09T08:15:04+00:00",
+        "total": 16697000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16697000000
+          }
+        ]
+      },
+      {
+        "commit": "e0320f0ff02d8265bc31f17813409ad78e9b58d0",
+        "first_parent_index": 44,
+        "author_timestamp": "2026-11-09T08:36:31+00:00",
+        "total": 16703000000,
+        "authors": [
+          {
+            "author": 0,
+            "amount": 16703000000
+          }
+        ]
+      }
+    ]
+  }
+}
