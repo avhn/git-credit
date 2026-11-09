@@ -14,6 +14,9 @@ mod history;
 mod identities;
 mod replay;
 mod scoring;
+mod timeline;
+
+pub use timeline::{ActivityBucket, OwnershipSample, Timeline};
 
 pub use credit_core::ALGORITHM_VERSION;
 use credit_core::{AuthorId, Policy};
@@ -140,6 +143,8 @@ pub struct CacheOptions {
 /// Analysis policy, independent of CLI serialization and glob implementation.
 #[derive(Debug, Clone)]
 pub struct Options {
+    /// Collect weekly activity and first-parent ownership summaries.
+    pub timeline: bool,
     /// Disk cache, disabled for library callers without an exclusion fingerprint.
     pub cache: Option<CacheOptions>,
     /// Attribution units, token by default.
@@ -162,6 +167,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            timeline: false,
             cache: None,
             granularity: Granularity::default(),
             bulk_discount: true,
@@ -198,6 +204,8 @@ pub struct Directory {
 /// Deterministic analysis output. All credit amounts are millionths of a line.
 #[derive(Debug)]
 pub struct Report {
+    /// Optional historical summaries using the final privacy-filtered identity table.
+    pub timeline: Option<Timeline>,
     /// Cache diagnostics for verbose stderr only, never part of report JSON.
     pub cache_diagnostics: Vec<String>,
     /// Attribution units used for this report.

@@ -18,7 +18,7 @@ use crate::{
 /// Maximum encoded pack size, including its checksum (256 MiB).
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// Cache representation version, independent of attribution semantics.
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 
 /// Validated attribution shares encoded without exposing serde in core.
 type Shares = Vec<(u32, u32)>;
@@ -33,6 +33,18 @@ pub(crate) struct Commit {
     pub(crate) warnings: Vec<String>,
 }
 
+/// Integer ownership summary, never a historical file map.
+#[derive(Default, Serialize, Deserialize)]
+pub(crate) struct Summary {
+    pub(crate) total: u64,
+    pub(crate) authors: BTreeMap<u32, u64>,
+}
+
+/// Fingerprint numeric allocation order because token ownership rounds in ID order.
+pub(crate) fn allocation_key(groups: &BTreeMap<u32, String>) -> Result<String, Error> {
+    Ok(digest(&postcard::to_allocvec(groups).map_err(invalid)?))
+}
+
 /// One immutable file state, addressed by the digest of its encoded bytes.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct File {
@@ -45,6 +57,8 @@ pub(crate) struct File {
 pub(crate) struct Pack {
     pub(crate) key: String,
     pub(crate) identity_key: String,
+    pub(crate) allocation_key: String,
+    pub(crate) ownership: BTreeMap<String, Summary>,
     pub(crate) groups: BTreeMap<u32, String>,
     pub(crate) head: String,
     pub(crate) commits: BTreeMap<String, Commit>,

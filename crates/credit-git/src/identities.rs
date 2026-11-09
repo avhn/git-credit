@@ -161,6 +161,7 @@ impl Authors {
         options: &Options,
         ledger: &mut Ledger,
         directories: &mut [Directory],
+        timeline: Option<&mut crate::Timeline>,
     ) -> Result<Vec<Author>, Error> {
         let mut authors = Vec::new();
         let mut mapping = BTreeMap::new();
@@ -208,6 +209,14 @@ impl Authors {
             .iter()
             .map(|directory| remap(&directory.authors, &mapping))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(timeline) = timeline {
+            for bucket in &mut timeline.activity {
+                bucket.authors = remap(&bucket.authors, &mapping)?;
+            }
+            for sample in &mut timeline.ownership {
+                sample.authors = remap(&sample.authors, &mapping)?;
+            }
+        }
         ledger.ownership = ownership;
         ledger.labor = labor;
         for (directory, authors) in directories.iter_mut().zip(remapped_directories) {

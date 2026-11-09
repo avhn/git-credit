@@ -45,6 +45,11 @@ fn analyze_attempt(
     resumed: &mut bool,
 ) -> Result<Report, Error> {
     options.policy.validate()?;
+    if options.timeline && options.walk != crate::Walk::Full {
+        return Err(Error::InvalidInput(
+            "timeline requires full history; remove --first-parent or set walk = 'full'".into(),
+        ));
+    }
     let repo = gix::discover(path).map_err(git_error)?;
     if repo.is_shallow().map_err(git_error)? {
         return Err(Error::ShallowRepository);
@@ -91,8 +96,14 @@ fn analyze_attempt(
         .filter(|(id, _)| wanted.contains(*id))
         .map(|(id, files)| (*id, files.clone()))
         .collect();
+    let selected = if options.timeline {
+        crate::timeline::samples(&history, head.id)
+    } else {
+        BTreeMap::new()
+    };
     let state = Replay::default();
     let mut run = ReplayRun {
+        selected,
         pack,
         retained,
         snapshots,
@@ -101,7 +112,34 @@ fn analyze_attempt(
         replayed: 0,
     };
     run.execute(&repo, &mut history, &identities, options, excluded, &wanted)?;
+    run.pack.identity_key =
+        crate::cache::identity_key(run.pack.commits.keys(), &identities, &groups)?;
+    run.pack.allocation_key = crate::cache::allocation_key(&groups)?;
+    run.pack.groups = groups;
+    finish_report(
+        run,
+        &repo,
+        &history,
+        authors,
+        options,
+        diagnostics,
+        directory.as_deref(),
+    )
+}
+
+/// Finalize privacy and historical accounting before publishing a cache generation.
+fn finish_report(
+    run: ReplayRun,
+    repo: &gix::Repository,
+    history: &crate::history::History,
+    authors: Authors,
+    options: &Options,
+    mut diagnostics: Vec<String>,
+    directory: Option<&Path>,
+) -> Result<Report, Error> {
+    let head = *history.order.last().ok_or(Error::EmptyRepository)?;
     let ReplayRun {
+        selected,
         mut pack,
         mut retained,
         snapshots,
@@ -110,31 +148,43 @@ fn analyze_attempt(
         replayed,
     } = run;
     state.files = retained
-        .remove(&head.id)
+        .remove(&head)
         .ok_or_else(|| Error::InvalidInput("missing HEAD state".into()))?;
-    let bulk_edit_commits = aggregate(&mut state, &pack, &history)?;
-    pack.identity_key = crate::cache::identity_key(pack.commits.keys(), &identities, &groups)?;
-    pack.groups = groups;
+    let bulk_edit_commits = aggregate(&mut state, &pack, history)?;
     state.ledger.ownership = scoring::ownership(state.files.values().map(|file| &file.state))?;
     let mut directories = directories(&state.files, options.depth)?;
-    let authors = authors.finish(options, &mut state.ledger, &mut directories)?;
+    let mut timeline = options
+        .timeline
+        .then(|| crate::timeline::collect(repo, history, &pack, &selected))
+        .transpose()?;
+    let authors = authors.finish(
+        options,
+        &mut state.ledger,
+        &mut directories,
+        timeline.as_mut(),
+    )?;
+    if options.timeline {
+        let selected: BTreeSet<_> = selected.keys().map(ToString::to_string).collect();
+        pack.ownership.retain(|id, _| selected.contains(id));
+    }
     let commits_analyzed = u64::try_from(history.order.len())
         .map_err(|_| Error::InvalidInput("too many commits".into()))?;
     persist_cache(
-        directory.as_deref(),
+        directory,
         &mut pack,
-        head.id,
+        head,
         &snapshots,
         replayed,
         &mut diagnostics,
     );
     Ok(Report {
+        timeline,
         cache_diagnostics: diagnostics,
         granularity: options.granularity,
         bulk_edit_commits,
         walk: options.walk,
         peak_retained_states,
-        head: head.id.to_string(),
+        head: head.to_string(),
         commits_analyzed,
         formatting_commits: state.formatting,
         authors,
@@ -196,6 +246,7 @@ fn persist_cache(
 
 /// Mutable execution state shared across the ordered commit replay loop.
 struct ReplayRun {
+    selected: BTreeMap<gix::ObjectId, usize>,
     pack: crate::cache::Pack,
     retained: BTreeMap<gix::ObjectId, Files>,
     snapshots: BTreeMap<gix::ObjectId, Files>,
@@ -253,6 +304,20 @@ impl ReplayRun {
                 excluded,
                 &other_parents,
             )?;
+            if self.selected.contains_key(id) {
+                let authors =
+                    scoring::ownership(self.state.files.values().map(|file| &file.state))?;
+                self.pack.ownership.insert(
+                    id.to_string(),
+                    crate::cache::Summary {
+                        total: crate::timeline::total(authors.values())?,
+                        authors: authors
+                            .into_iter()
+                            .map(|(id, amount)| (id.0, amount))
+                            .collect(),
+                    },
+                );
+            }
             if options.walk == crate::Walk::FirstParent && commit.parent_ids().count() > 1 {
                 self.state.warnings.insert("Merge attribution is approximate: first-parent merge diffs credit the merge author and co-authors.".into());
             }
@@ -387,6 +452,7 @@ fn resume(
     if pack.identity_key != crate::cache::identity_key(pack.commits.keys(), identities, groups)? {
         return Err(invalid("identity digest changed (mailmap or grouping)"));
     }
+    validate_summaries(&pack, history, groups, options.timeline)?;
     crate::cache::remap_identities(&mut pack, groups)?;
     let author_count = identities
         .values()
@@ -440,9 +506,64 @@ fn resume(
             };
             files.insert(path.clone(), file);
         }
+        if let Some(summary) = pack.ownership.get(&id.to_string()) {
+            let ownership = scoring::ownership(files.values().map(|file| &file.state))?;
+            let encoded: BTreeMap<_, _> = ownership
+                .into_iter()
+                .map(|(id, amount)| (id.0, amount))
+                .collect();
+            if encoded != summary.authors {
+                return Err(invalid("cached ownership summary differs from snapshot"));
+            }
+        }
         retained.insert(id, files);
     }
     Ok((pack, retained))
+}
+
+/// Validate historical summaries at the same trust boundary as resumable files.
+/// Numeric order must stay unchanged: remapping already-rounded totals is unsafe.
+fn validate_summaries(
+    pack: &crate::cache::Pack,
+    history: &crate::history::History,
+    groups: &BTreeMap<u32, String>,
+    timeline: bool,
+) -> Result<(), Error> {
+    let invalid = |message: &str| Error::InvalidInput(message.to_owned());
+    if pack.ownership.len() > 120 {
+        return Err(invalid("too many cached ownership summaries"));
+    }
+    if !pack.ownership.is_empty() {
+        if pack.allocation_key != crate::cache::allocation_key(&pack.groups)?
+            || pack
+                .groups
+                .iter()
+                .any(|(id, key)| groups.get(id) != Some(key))
+        {
+            return Err(invalid("timeline identity allocation changed; rebuilding"));
+        }
+        for (id, summary) in &pack.ownership {
+            if !pack.commits.contains_key(id)
+                || summary
+                    .authors
+                    .keys()
+                    .any(|id| !pack.groups.contains_key(id))
+                || crate::timeline::total(summary.authors.values())? != summary.total
+                || summary.total % u64::from(credit_core::SCALE) != 0
+            {
+                return Err(invalid("invalid cached ownership summary"));
+            }
+        }
+    }
+    if timeline && let Some(head) = history.order.last() {
+        for id in crate::timeline::samples(history, *head).keys() {
+            let id = id.to_string();
+            if pack.commits.contains_key(&id) && !pack.ownership.contains_key(&id) {
+                return Err(invalid("missing timeline sample coverage; rebuilding"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Require every old replay boundary and requested retained ancestor snapshot.
