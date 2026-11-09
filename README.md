@@ -51,6 +51,22 @@ Bob's reformat earns nothing and takes nothing, so he does not appear. Alice kee
 the code she wrote, Carol is credited with exactly the token she changed, and
 Dave owns his new function.
 
+On a terminal the header is bold, each author's row and inline bar uses the same
+color order as the charts, and the footer is dim. Percentages remain visible:
+
+```console
+$ git credit analyze --bars --ascii
+AUTHOR  OWNERSHIP %  OWNED LINES  LABOR  OWNERSHIP
+Alice         79.5%         23.9  17.0   ################....
+Dave          20.0%          6.0  6.0    ####................
+Carol          0.5%          0.1  0.1    ....................
+```
+
+The sample describes colors rather than embedding ANSI in Markdown. Redirected
+output stays plain and unchanged by default. Use `--tree --depth 2` for directory
+owners, `--no-color` or nonempty `NO_COLOR` to disable color, and
+`--color always --bars` to capture ANSI deliberately. See [terminal flags](docs/usage.md).
+
 ## Two numbers per person
 
 | Column        | Question it answers                                      | Goes down when                          |
@@ -164,9 +180,40 @@ in [json.md](docs/json.md).
 `git credit badge` renders these from the same analysis. This repository's own,
 regenerated on every push:
 
-![Contributions](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar.svg">
+  <img alt="Contributions: surviving ownership" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-bar.svg">
+</picture>
 
-![Contribution summary](https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-donut-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-donut.svg">
+  <img alt="Ownership donut: top contributors and others" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-donut.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-labor-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-labor.svg">
+  <img alt="Ownership and historical labor in lines" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-labor.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-treemap-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-treemap.svg">
+  <img alt="Directory ownership: area represents surviving lines" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-treemap.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg">
+  <img alt="Contributor summary with mini ownership bars" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg">
+</picture>
+
+The bar remains the lead chart. Donut slices are not inflated; labor includes
+meaningful work later rewritten. Treemap area is directory ownership, with color
+identifying the leading owner. GitHub supports these `<picture>` sources and
+selects the reader's color scheme.
 
 ![Bus factor](https://raw.githubusercontent.com/avhn/git-credit/badges/bus-factor.svg)
 

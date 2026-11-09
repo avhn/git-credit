@@ -275,5 +275,30 @@ esac
         self.assertNotIn("--force|", log)
 
 
+class ChartStaging(unittest.TestCase):
+    """All paired visualization assets must survive the publication allowlist."""
+
+    def test_all_light_dark_chart_pairs_are_staged(self):
+        """Stage fixed chart names and per-author dark variants, excluding unknown SVGs."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source, destination = root / "source", root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            names = {"credit.json", "bus-factor.json", "top-contributor.json"}
+            names.update(name + suffix + ".svg"
+                         for name in ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "bus-factor")
+                         for suffix in ("", "-dark"))
+            for name in names:
+                (source / name).write_text(name)
+            (source / "credit-unknown.svg").write_text("not generated")
+            (source / "authors").mkdir()
+            (source / "authors/author-alice-dark.svg").write_text("dark author")
+            STAGE.stage(source, destination)
+            names.add("authors/author-alice-dark.svg")
+            actual = {p.relative_to(destination).as_posix() for p in destination.rglob("*") if p.is_file()}
+            self.assertEqual(actual, names)
+
+
 if __name__ == "__main__":
     unittest.main()

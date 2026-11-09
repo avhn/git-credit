@@ -18,7 +18,10 @@ def stage(source, destination):
         raise ValueError("publication directory must be new and empty")
     required = ["credit.json", "bus-factor.json", "top-contributor.json"]
     files = [source / name for name in required]
-    files += [source / name for name in ("credit-bar.svg", "credit-card.svg", "bus-factor.svg") if (source / name).exists()]
+    chart_names = ("credit-bar", "credit-card", "credit-donut", "credit-labor", "credit-treemap", "bus-factor")
+    files += [source / (name + suffix + ".svg")
+              for name in chart_names for suffix in ("", "-dark")
+              if (source / (name + suffix + ".svg")).exists()]
     authors = source / "authors"
     if authors.is_symlink():
         raise ValueError("authors directory must not be a symlink")

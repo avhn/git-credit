@@ -20,11 +20,14 @@ inputs:
     description: Generated asset directory relative to the checkout
     default: .git-credit
   styles:
-    description: SVG selection (bar, card, bus-factor, authors or all)
+    description: SVG selection (bar, card, donut, labor, treemap, bus-factor, authors or all; light/dark pairs)
     default: all
   top:
     description: Maximum named contributors (1 through 1000)
     default: '5'
+  depth:
+    description: Flat directory treemap depth (zero disables directory data)
+    default: '1'
   publish-branch:
     description: Generated-only branch to replace; empty disables publication
     default: badges
@@ -73,6 +76,7 @@ runs:
         GC_OUT_DIR: ${{ inputs.out-dir }}
         GC_STYLE: ${{ inputs.styles }}
         GC_TOP: ${{ inputs.top }}
+        GC_DEPTH: ${{ inputs.depth }}
         GC_CACHE: ${{ inputs.cache }}
         GC_CACHE_DIR: ${{ steps.replay-cache.outputs.directory }}
       run: |
@@ -81,7 +85,7 @@ runs:
         if [ "$GC_CACHE" != true ]; then
           cache_args=(--no-cache)
         fi
-        "$GC_BINARY" badge . --out-dir "$GC_OUT_DIR" --style "$GC_STYLE" --top "$GC_TOP" "${cache_args[@]}"
+        "$GC_BINARY" badge . --out-dir "$GC_OUT_DIR" --style "$GC_STYLE" --top "$GC_TOP" --depth "$GC_DEPTH" "${cache_args[@]}"
     - name: Publish generated assets
       if: inputs.publish-branch != ''
       shell: bash

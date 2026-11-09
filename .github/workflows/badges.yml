@@ -43,5 +43,7 @@ jobs:
         with:
           cache: 'true'
           binary: target/release/git-credit
+          styles: all
+          depth: '1'
           source-branch: main
           publish-branch: badges

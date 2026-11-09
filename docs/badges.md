@@ -8,7 +8,7 @@ work, even when it was later deleted. Neither metric measures a person's value.
 
 ```console
 git-credit badge . --out-dir .git-credit
-git-credit badge ../project --out-dir .git-credit --style card --theme dark
+git-credit badge ../project --out-dir .git-credit --style donut
 git-credit badge --from credit.json --out-dir .git-credit --top 8 --width 800
 ```
 
@@ -22,10 +22,11 @@ fail with a `git fetch --unshallow` hint; no fetching occurs during analysis.
 | --- | --- | --- |
 | `PATH` | `.` | Repository to analyze; ignored with `--from` |
 | `--out-dir DIR` | Required | Directory for generated assets |
-| `--style` | `all` | One of `bar`, `card`, `bus-factor`, `authors`, `all` |
+| `--style` | `all` | One of `bar`, `card`, `donut`, `labor`, `treemap`, `bus-factor`, `authors`, `all` |
 | `--top N` | `5` | Named contributors, from 1 to 1000 |
-| `--theme` | `light` | `light` or `dark`, applied to the summary card |
-| `--width PX` | `600` | Bar and card width, from 200 to 4096 pixels |
+| `--theme` | `light` | Legacy accepted option; both themes are always generated |
+| `--width PX` | `600` | Chart width, from 200 to 4096 pixels |
+| `--depth N` | `1` | Flat directory depth for the treemap; zero disables directory data |
 | `--from REPORT_JSON` | None | Import a privacy-filtered [schema 1 report](json.md), without opening a repository |
 | `--cache-dir DIR` | Inside Git directory | Override replay cache location |
 | `--cache-depth N` | `64` | Retain N first-parent ancestors plus HEAD |
@@ -46,11 +47,32 @@ ownership produces a valid `no data` ownership badge, not a fictitious bus facto
 | --- | --- |
 | `credit-bar.svg` | `bar` or `all`: top N stacked ownership shares plus others and a legend |
 | `credit-card.svg` | `card` or `all`: top N ownership percentages and labor, commit count and short HEAD |
+| `credit-donut.svg` | `donut` or `all`: exact proportional ring with top N and Others, legend sums to 100.0% |
+| `credit-labor.svg` | `labor` or `all`: paired owned-line and historical labor bars on a common scale |
+| `credit-treemap.svg` | `treemap` or `all`: squarified directory areas, colored by their leading owner |
 | `bus-factor.svg` | `bus-factor` or `all`: minimum ranked contributors strictly exceeding 50% ownership |
 | `authors/author-<slug>.svg` | `authors` or `all`: each top contributor's owned percentage |
 | `bus-factor.json` | Always: shields.io endpoint with red (1), yellow (2), green (3+) or no-data gray |
 | `top-contributor.json` | Always: shields.io endpoint with the leading name and whole ownership percent |
 | `credit.json` | Always: the analyze JSON report, including policy and directory data |
+
+Every SVG listed above also has a `-dark.svg` companion, including
+`authors/author-<slug>-dark.svg`. Unsuffixed files are always light. The legacy
+`--theme` option is accepted for compatibility but no longer changes file contents:
+replace old dark-only references with the explicit `-dark.svg` name. The card keeps
+its existing filename and adds mini ownership bars to each row.
+
+Donut angles use the exact input shares, not rounded legend percentages, and tiny
+slices are not inflated. One owner produces a complete circle; zero live ownership
+produces `no data`. The center counts live owners. Labor uses line-equivalent
+values, including later rewritten work, not a retention rate or difference metric.
+Filled owned bars and outlined labor bars also have explicit numeric/text labels.
+Treemaps use a flat snapshot at `--depth`, descending size with lexical tie-breaks,
+and a deterministic squarified layout. Zero-size directories are omitted. Small
+rectangles retain their path, owner, share and line count in `<title>` tooltips
+when visible labels cannot fit; larger labels have contrasting backing surfaces.
+Text contrast is at least 4.5:1 and categorical fills at least 3:1 in both themes.
+Colors are rank-based, color-blind-safe hues; all color encodings have text labels.
 
 Names become bounded ASCII filename components prefixed with `author-`, avoiding
 path traversal and Windows device names. Deterministic numeric suffixes resolve
@@ -65,7 +87,19 @@ owners yield 3. Historical labor does not change this ownership-based calculatio
 
 ## Add badges to a README
 
-Publish generated files to a branch and embed their raw URLs:
+Publish generated files to a branch and embed their raw URLs. GitHub supports
+`<picture>` with `prefers-color-scheme` sources; the `<img>` is the light fallback:
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/OWNER/REPO/badges/credit-donut-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/OWNER/REPO/badges/credit-donut.svg">
+  <img alt="Ownership shares with names and percentages" src="https://raw.githubusercontent.com/OWNER/REPO/badges/credit-donut.svg">
+</picture>
+```
+
+Use the same pattern for the bar, labor chart, treemap and contributor card.
+For an always-light image, Markdown still works:
 
 ```markdown
 ![Contributions](https://raw.githubusercontent.com/OWNER/REPO/badges/credit-bar.svg)
@@ -132,7 +166,8 @@ jobs:
 | `version` | `latest` | Download the latest release or a tag such as `v0.1.0` |
 | `binary` | Empty | Use an existing executable path, skipping download/checksum verification |
 | `out-dir` | `.git-credit` | Generated directory, relative to the checkout unless absolute |
-| `styles` | `all` | One CLI style selection, not a comma-separated list |
+| `styles` | `all` | `bar`, `card`, `donut`, `labor`, `treemap`, `bus-factor`, `authors` or `all`; one selection, always light/dark pairs |
+| `depth` | `1` | Directory depth for treemap data; zero disables it |
 | `top` | `5` | Number of named contributors |
 | `publish-branch` | `badges` | Branch to replace; empty skips publication |
 | `token` | `${{ github.token }}` | Token with `contents: write` when publishing |

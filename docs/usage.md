@@ -21,7 +21,7 @@ ignored.
 | Flag                         | Default        | Effect                                                                  |
 | ---------------------------- | -------------- | ----------------------------------------------------------------------- |
 | `--json`                     | off            | Versioned JSON report instead of a table ([contract](json.md))          |
-| `--depth N`                  | `1`            | Directory breakdown depth in JSON; `0` disables it                      |
+| `--depth N`                  | `1`            | Directory breakdown depth for JSON and `--tree`; `0` disables it                      |
 | `--exclude GLOB`             | none           | Skip matching paths; repeat the flag; replaces config exclusions        |
 | `--by-email`                 | off            | Do not merge identities that share a display name                       |
 | `--granularity line\|token`  | `token`        | Attribution unit; reports always use line-equivalent units              |
@@ -33,7 +33,12 @@ ignored.
 | `--cache-depth N`            | `64`           | First-parent ancestor snapshots kept in addition to `HEAD`              |
 | `-q`, `--quiet`              | off            | Hide warnings; results and errors still print                           |
 | `-v`, `-vv`                  | off            | Diagnostics on stderr (cache decisions, skipped files)                  |
-| `--no-color`                 | off            | Accepted for scripts; output is plain text and honors `NO_COLOR`        |
+| `--no-color`                 | off            | Disable ANSI color; nonempty `NO_COLOR` also disables it                 |
+| `--color auto\|always\|never` | `auto`         | Color on terminals, explicitly force ANSI, or never use ANSI             |
+| `--ascii`                    | off            | ASCII ownership bars and tree branches instead of Unicode               |
+| `--bars`                     | TTY only       | Include ownership bars even in redirected output                        |
+| `--no-bars`                  | off            | Hide ownership bars, including on terminals                             |
+| `--tree`                     | off            | Indented directory ownership with the top three owners; conflicts with `--json` |
 
 Exit codes: `0` success, `1` analysis or configuration error, `2` invalid usage.
 Results go to stdout and diagnostics to stderr, so `--json` output pipes cleanly.
@@ -58,6 +63,34 @@ HEAD e5c6d840fbfd | 4 commits | full | token | algorithm 4
 - **Footer**: analyzed commit, number of commits, walk mode (`full` or
   `first-parent`), granularity and algorithm version. Reports from different
   algorithm versions are not comparable.
+
+### Terminal presentation
+
+Terminals get a bold header, categorical author colors, inline ownership bars and
+a dim footer. Warnings are yellow on stderr. Every author still has an explicit
+percentage. `--color always` deliberately enables ANSI in redirected output;
+`--no-color` and **nonempty** `NO_COLOR` take precedence, even over `always`.
+An empty `NO_COLOR` does not disable color. JSON never contains presentation ANSI.
+
+Bars default to 20 cells and shrink with the available `COLUMNS` width (bounded
+from 40 to 512 columns; invalid or absent values use 80). The locale hint uses the
+first nonempty `LC_ALL`, `LC_CTYPE` or `LANG`. Non-UTF-8 locales, including `C` and
+`POSIX`, use `#` and `.`; `--ascii` forces that fallback. With no locale hint,
+Unicode is used. Names, paths and diagnostics have terminal controls and bidi
+formatting marks neutralized. No terminal settings change attribution.
+
+```console
+$ git credit analyze --tree --depth 2 --ascii --no-color
+DIRECTORY OWNERSHIP
++- src
+  +- parser  Alice 75.0%, Dave 25.0%
+```
+
+`--tree` is opt-in and reports the existing directory snapshot at `--depth`, not a
+second analysis. Intermediate directories are structural nodes, not duplicated
+ownership totals. `--depth 0 --tree` explicitly reports that directory data is
+unavailable. Plain redirected `analyze` without these overrides is byte-identical
+to the original table; `--json` retains its existing serialization.
 
 ## How credit is decided
 
@@ -144,6 +177,8 @@ it. Measurements: [PERFORMANCE.md](PERFORMANCE.md).
 
 `git credit badge --out-dir DIR` writes `credit-bar.svg`, `credit-card.svg`,
 `bus-factor.svg`, `authors/*.svg`, shields.io endpoint files and `credit.json`.
-`--style bar|card|bus-factor|authors|all`, `--top N` and `--theme light|dark`
-select the output; `--from credit.json` renders an existing report. The reusable
+`--style bar|card|donut|labor|treemap|bus-factor|authors|all`, `--top N`,
+`--depth N` and `--width PX` select the output. Every SVG gets light and `-dark`
+variants; legacy `--theme light|dark` is accepted but no longer selects one theme.
+`--from credit.json` renders an existing report. The reusable
 GitHub Action and its privacy notes are in [badges.md](badges.md).
