@@ -1,0 +1,70 @@
+# Purpose: Prove the one-line install scripts work against the latest published release.
+# Triggers: Push to main touching an install script, weekly schedule on Monday 07:00 UTC, manual invocation.
+# Production effect: None.
+# Gates: Independent, non-gating.
+# External dependencies: GitHub-hosted ubuntu-latest, macos-latest and windows-latest runners; GitHub releases.
+# Failure owner: avhn, GitHub Actions run status and logs.
+# Budgets: initial estimate set 2026-11-09 before any measured run.
+name: Install scripts
+on:
+  push:
+    branches: [main]
+    paths: [install.sh, install.ps1, .github/workflows/install.yml]
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integration:
+    name: Integration tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            shell: sh
+          - runner: ubuntu-latest
+            shell: alpine
+          - runner: macos-latest
+            shell: sh
+          - runner: windows-latest
+            shell: powershell
+          - runner: windows-latest
+            shell: pwsh
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run install script
+        if: matrix.shell == 'sh'
+        run: |
+          dir="$RUNNER_TEMP/git-credit-bin"
+          GIT_CREDIT_INSTALL_DIR="$dir" sh install.sh
+          "$dir/git-credit" --version
+      - name: Run install script in Alpine
+        if: matrix.shell == 'alpine'
+        run: |
+          docker run --rm -v "$PWD/install.sh:/install.sh:ro" alpine:3.20 sh -c \
+            'apk add -q curl && sh /install.sh && ~/.local/bin/git-credit --version'
+      - name: Run install script in Windows PowerShell
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        env:
+          GIT_CREDIT_NO_MODIFY_PATH: "1"
+        run: |
+          $env:GIT_CREDIT_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'git-credit-bin'
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          & (Join-Path $env:GIT_CREDIT_INSTALL_DIR 'git-credit.exe') --version
+      - name: Run install script in PowerShell 7
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        env:
+          GIT_CREDIT_NO_MODIFY_PATH: "1"
+        run: |
+          $env:GIT_CREDIT_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'git-credit-bin'
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          & (Join-Path $env:GIT_CREDIT_INSTALL_DIR 'git-credit.exe') --version
