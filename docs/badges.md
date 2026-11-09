@@ -22,7 +22,7 @@ fail with a `git fetch --unshallow` hint; no fetching occurs during analysis.
 | --- | --- | --- |
 | `PATH` | `.` | Repository to analyze; ignored with `--from` |
 | `--out-dir DIR` | Required | Directory for generated assets |
-| `--style` | `all` | One of `bar`, `card`, `donut`, `labor`, `treemap`, `bus-factor`, `authors`, `all` |
+| `--style` | `all` | One of `bar`, `card`, `donut`, `labor`, `treemap`, `activity`, `history`, `bus-factor`, `authors`, `all` |
 | `--top N` | `5` | Named contributors, from 1 to 1000 |
 | `--theme` | `light` | Legacy accepted option; both themes are always generated |
 | `--width PX` | `600` | Chart width, from 200 to 4096 pixels |
@@ -50,6 +50,8 @@ ownership produces a valid `no data` ownership badge, not a fictitious bus facto
 | `credit-donut.svg` | `donut` or `all`: exact proportional ring with top N and Others, legend sums to 100.0% |
 | `credit-labor.svg` | `labor` or `all`: paired owned-line and historical labor bars on a common scale |
 | `credit-treemap.svg` | `treemap` or `all`: squarified directory areas, colored by their leading owner |
+| `credit-activity.svg` | `activity` or `all`: weekly meaningful labor columns by author, monthly above 150 weeks |
+| `credit-history.svg` | `history` or `all`: absolute owned-line areas along the main line of history |
 | `bus-factor.svg` | `bus-factor` or `all`: minimum ranked contributors strictly exceeding 50% ownership |
 | `authors/author-<slug>.svg` | `authors` or `all`: each top contributor's owned percentage |
 | `bus-factor.json` | Always: shields.io endpoint with red (1), yellow (2), green (3+) or no-data gray |
@@ -73,6 +75,32 @@ rectangles retain their path, owner, share and line count in `<title>` tooltips
 when visible labels cannot fit; larger labels have contrasting backing surfaces.
 Text contrast is at least 4.5:1 and categorical fills at least 3:1 in both themes.
 Colors are rank-based, color-blind-safe hues; all color encodings have text labels.
+
+Activity and history styles (including `all`) automatically enable timeline analysis.
+Other styles retain the existing analysis cost unless timeline is enabled in config.
+Imported reports with no timeline produce valid `no data` images for these styles;
+use `analyze --timeline --json` to include historical data when exporting a report.
+Import validates historical units, author references, calendar dates, ordering and
+integer conservation before writing any asset.
+
+Activity columns use weekly meaningful labor in line units, top N by the same
+ownership rank as the other charts, and neutral gray Others. Empty weeks remain
+gaps. Spans above 150 calendar weeks aggregate into calendar months using each
+UTC Monday's month, explicitly noted in the subtitle. Month or year date ticks
+are thinned to avoid overlap; y ticks use readable line values. This is meaningful
+labor, not commit counts or raw churn.
+
+Ownership history is a stacked area in absolute owned lines, not percentages, so
+repository growth and deletion remain visible. Samples are equally spaced by
+sample sequence along HEAD's first-parent ancestry. Axis dates are the latest commit
+time reached on the main line: each sample's label uses the running maximum of the
+sample author timestamps, so rebased or long-lived branches cannot move labels
+backwards. Month or year ticks mark the first sample entering each new period;
+ticks that would overlap are skipped. Original timestamps remain unchanged in
+`credit.json`, and full-graph attribution is retained at each sample. The subtitle
+explains the date convention. A single ownership sample is shown as a stacked
+column rather than a zero-width area. Historical-only authors keep their shared
+palette rank and remain eligible for the top-N legend. No share variant is generated.
 
 Names become bounded ASCII filename components prefixed with `author-`, avoiding
 path traversal and Windows device names. Deterministic numeric suffixes resolve
@@ -98,7 +126,7 @@ Publish generated files to a branch and embed their raw URLs. GitHub supports
 </picture>
 ```
 
-Use the same pattern for the bar, labor chart, treemap and contributor card.
+Use the same pattern for the bar, labor chart, treemap, activity, history and contributor card.
 For an always-light image, Markdown still works:
 
 ```markdown
@@ -166,7 +194,7 @@ jobs:
 | `version` | `latest` | Download the latest release or a tag such as `v0.1.0` |
 | `binary` | Empty | Use an existing executable path, skipping download/checksum verification |
 | `out-dir` | `.git-credit` | Generated directory, relative to the checkout unless absolute |
-| `styles` | `all` | `bar`, `card`, `donut`, `labor`, `treemap`, `bus-factor`, `authors` or `all`; one selection, always light/dark pairs |
+| `styles` | `all` | `bar`, `card`, `donut`, `labor`, `treemap`, `activity`, `history`, `bus-factor`, `authors` or `all`; one selection, always light/dark pairs |
 | `depth` | `1` | Directory depth for treemap data; zero disables it |
 | `top` | `5` | Number of named contributors |
 | `publish-branch` | `badges` | Branch to replace; empty skips publication |

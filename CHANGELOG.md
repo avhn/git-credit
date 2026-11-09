@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Paired light/dark activity and ownership-history SVG charts, with deterministic
+  calendar axes, weekly gaps, monthly aggregation for long activity spans, shared
+  contributor colors and privacy-filtered top-N legends.
+- Weekly activity sparkline below `--timeline` TTY tables, showing the last 52
+  calendar weeks, period and peak labor, with Unicode and ASCII levels.
+- `badge --style activity` and `history`, included in `all`, automatic timeline
+  analysis, optional timeline report import and generated-asset publication support.
 - Opt-in `analyze --timeline` and config `timeline = true`: UTC weekly activity by
   author time and full-graph ownership sampled along HEAD's first-parent ancestry.
 - Exact integer historical totals with report-local author references and final

@@ -210,6 +210,23 @@ regenerated on every push:
   <img alt="Contributor summary with mini ownership bars" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-card.svg">
 </picture>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-activity-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-activity.svg">
+  <img alt="Meaningful activity: weekly labor by contributor, monthly for long histories" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-activity.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-history-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-history.svg">
+  <img alt="Ownership over time: absolute owned lines along the main line of history" src="https://raw.githubusercontent.com/avhn/git-credit/badges/credit-history.svg">
+</picture>
+
+The activity chart shows meaningful labor with empty periods kept as gaps. Ownership
+history shows absolute owned lines, so repository growth stays visible. Both use
+shared contributor colors, top-N legends and neutral gray Others. Timeline analysis
+is automatic for `badge --style all`, `activity` and `history`.
+
 The bar remains the lead chart. Donut slices are not inflated; labor includes
 meaningful work later rewritten. Treemap area is directory ownership, with color
 identifying the leading owner. GitHub supports these `<picture>` sources and

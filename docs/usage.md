@@ -21,7 +21,7 @@ ignored.
 | Flag                         | Default        | Effect                                                                  |
 | ---------------------------- | -------------- | ----------------------------------------------------------------------- |
 | `--json`                     | off            | Versioned JSON report instead of a table ([contract](json.md))          |
-| `--timeline`                 | off            | Add weekly labor and sampled ownership to JSON; requires full history   |
+| `--timeline`                 | off            | Add timeline JSON or a weekly sparkline on TTY tables; requires full history   |
 | `--depth N`                  | `1`            | Directory breakdown depth for JSON and `--tree`; `0` disables it        |
 | `--exclude GLOB`             | none           | Skip matching paths; repeat the flag; replaces config exclusions        |
 | `--by-email`                 | off            | Do not merge identities that share a display name                       |
@@ -36,7 +36,7 @@ ignored.
 | `-v`, `-vv`                  | off            | Diagnostics on stderr (cache decisions, skipped files)                  |
 | `--no-color`                 | off            | Disable ANSI color; nonempty `NO_COLOR` also disables it                 |
 | `--color auto\|always\|never` | `auto`         | Color on terminals, explicitly force ANSI, or never use ANSI             |
-| `--ascii`                    | off            | ASCII ownership bars and tree branches instead of Unicode               |
+| `--ascii`                    | off            | ASCII bars, tree branches and activity levels instead of Unicode               |
 | `--bars`                     | TTY only       | Include ownership bars even in redirected output                        |
 | `--no-bars`                  | off            | Hide ownership bars, including on terminals                             |
 | `--tree`                     | off            | Indented directory ownership with the top three owners; conflicts with `--json` |
@@ -86,6 +86,20 @@ DIRECTORY OWNERSHIP
 +- src
   +- parser  Alice 75.0%, Dave 25.0%
 ```
+
+With `--timeline` (or config `timeline = true`), TTY table output adds one activity
+sparkline below the table. It covers the last 52 calendar weeks ending at the latest
+activity bucket, fills missing weeks with zeros, and labels the period and peak
+weekly labor in lines. Unicode blocks show eight positive levels; `--ascii` and
+non-UTF-8 locales select ASCII levels. Narrow terminals coalesce adjacent weeks
+using their peak, not their sum. JSON and redirected tables never include a
+sparkline, even with forced color or bars; `--tree` does not add one.
+
+`badge --style activity`, `history` and `all` automatically collect timeline data
+and write light/dark pairs. Activity uses weekly labor columns (monthly above 150
+weeks); ownership history uses absolute owned-line areas along the main line of
+history. Importing `--from` JSON without a timeline writes valid no-data images.
+See [badges](badges.md) for filenames, sampling, legends and privacy details.
 
 `--tree` is opt-in and reports the existing directory snapshot at `--depth`, not a
 second analysis. Intermediate directories are structural nodes, not duplicated
@@ -178,8 +192,9 @@ it. Measurements: [PERFORMANCE.md](PERFORMANCE.md).
 ## Badges
 
 `git credit badge --out-dir DIR` writes `credit-bar.svg`, `credit-card.svg`,
-`bus-factor.svg`, `authors/*.svg`, shields.io endpoint files and `credit.json`.
-`--style bar|card|donut|labor|treemap|bus-factor|authors|all`, `--top N`,
+`credit-activity.svg`, `credit-history.svg`, `bus-factor.svg`, `authors/*.svg`,
+shields.io endpoint files and `credit.json`.
+`--style bar|card|donut|labor|treemap|activity|history|bus-factor|authors|all`, `--top N`,
 `--depth N` and `--width PX` select the output. Every SVG gets light and `-dark`
 variants; legacy `--theme light|dark` is accepted but no longer selects one theme.
 `--from credit.json` renders an existing report. The reusable
