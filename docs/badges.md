@@ -87,7 +87,9 @@ https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FOW
 
 The reusable composite action downloads a release for Linux x86_64/ARM64, macOS
 x86_64/ARM64 or Windows x86_64, verifies its SHA-256 against that release's
-`SHA256SUMS`, and extracts only the regular binary. Checksums detect corruption;
+`SHA256SUMS`, and extracts only the regular binary. Linux prefers static musl
+archives and falls back to v0.1.0 GNU names only when musl is absent from the
+manifest. Checksums detect corruption;
 they do not provide independent authenticity if a release account is compromised.
 Pin the action to a reviewed full commit SHA and `version` to a released tag for
 repeatability. Replace `FULL_COMMIT_SHA` in the example with the reviewed release's
@@ -180,10 +182,17 @@ builds from source and uses that guard immediately before pushing.
 ## Releases
 
 Push `v<workspace version>` to build five native platform archives containing the
-binary, README and both licenses. Linux ARM64 uses `ubuntu-24.04-arm`; macOS builds
-both Apple targets with the Rust target toolchains. Windows uses zip, other targets
-use tar.gz. The release workflow checks version equality, policy, static checks,
-tests and all builds before `gh release create` uploads archives and `SHA256SUMS`.
-Only the final publication job has `contents: write`. Tag-triggered releases are a
-deliberate policy choice for this open source CLI. Until the first tagged release
-exists, use a source build with the action's `binary` input.
+binary, README and both licenses. Linux uses static musl on x86_64 and ARM64;
+ARM64 builds natively on `ubuntu-24.04-arm`. macOS builds both Apple targets with
+the Rust target toolchains. Windows uses zip, other targets use tar.gz. Linux
+builds also produce amd64 and arm64 Debian packages. The release workflow checks
+version equality, policy, static checks, tooling tests, unit tests and all builds
+before `gh release create` uploads archives, debs and `SHA256SUMS`.
+
+After release creation succeeds, independent jobs update the Homebrew tap and
+retain/sign the APT repository on Pages, followed by public installation checks.
+Only release publication and APT/Pages deployment can write repository contents;
+only deploy jobs have Pages/OIDC write permissions. Tag-triggered releases are a
+deliberate policy choice for this open source CLI. See [packaging.md](packaging.md)
+for channel authentication, the signing fingerprint, key rotation and manual
+Pages rebuilds. A source build remains available through the action's `binary` input.

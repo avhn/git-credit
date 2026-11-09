@@ -8,7 +8,7 @@ Fair git authorship stats. `git-credit` reports how much of a repository each pe
 wrote and how much work they put in, without letting a reformat, a renamed variable
 or a one-character fix take the credit away from the original author.
 
-> **Status: v0.1.0.** All planned phases are complete. `analyze` defaults to token-level attribution and
+> **Status: v0.1.1.** All planned phases are complete. `analyze` defaults to token-level attribution and
 > merge-aware full-history replay. Reports stay in line-equivalent units. Use
 > `--granularity line` for the legacy line rules. These metrics describe provenance,
 > not a person's value.
@@ -50,12 +50,50 @@ Attribution rules:
 
 ## Install
 
-Prebuilt binaries for Linux (x86_64, ARM64), macOS (Intel, Apple Silicon) and Windows
-(x86_64) are attached to each [GitHub release](https://github.com/avhn/git-credit/releases),
-with a `SHA256SUMS` file. Or build from source:
+### Homebrew (macOS and Linux)
+
+```sh
+brew install avhn/tap/git-credit
+```
+
+### APT (Debian 11+ and Ubuntu 20.04+)
+
+Packages support amd64 and arm64. Install the repository prerequisites, download
+its public keyring, and verify the fingerprint against
+`097DDFE92CE4B0F4E204F434668F8E1D756456FD` before trusting it.
+The keyring must contain exactly one primary public key with that fingerprint:
+
+```sh
+sudo apt update && sudo apt install -y ca-certificates curl gnupg
+curl -fsSL https://avhn.github.io/git-credit/apt/git-credit-archive-keyring.gpg -o git-credit-archive-keyring.gpg
+gpg --show-keys --with-fingerprint git-credit-archive-keyring.gpg
+sudo install -m 0644 git-credit-archive-keyring.gpg /usr/share/keyrings/git-credit-archive-keyring.gpg
+echo 'deb [signed-by=/usr/share/keyrings/git-credit-archive-keyring.gpg] https://avhn.github.io/git-credit/apt stable main' | sudo tee /etc/apt/sources.list.d/git-credit.list
+sudo apt update && sudo apt install git-credit
+```
+
+### Direct Debian package or binary
+
+Download `git-credit_0.1.1-1_amd64.deb` (or `_arm64.deb`) and `SHA256SUMS` from the
+[release](https://github.com/avhn/git-credit/releases/tag/v0.1.1). From that download
+directory, verify the selected package and install it:
+
+```sh
+grep '  git-credit_0.1.1-1_amd64.deb$' SHA256SUMS | sha256sum -c -
+sudo apt install ./git-credit_0.1.1-1_amd64.deb
+```
+
+Prebuilt archives for Linux (x86_64, ARM64), macOS (Intel, Apple Silicon) and Windows
+(x86_64) remain attached to every [GitHub release](https://github.com/avhn/git-credit/releases)
+with `SHA256SUMS`. Verify the selected archive's hash, then extract and place
+`git-credit` (`git-credit.exe` on Windows) on your PATH. Linux archives use static
+musl binaries, not a host glibc dependency. Checksums detect corruption, not a
+compromised release account. See [packaging and signing](docs/packaging.md).
+
+### Build from source
 
 ```console
-$ cargo install --git https://github.com/avhn/git-credit --tag v0.1.0 --locked git-credit
+$ cargo install --git https://github.com/avhn/git-credit --tag v0.1.1 --locked git-credit
 ```
 
 ## Usage
@@ -160,7 +198,8 @@ The generated `credit.json` also contains non-opted-out canonical email addresse
 - Rust stable via [rustup](https://rustup.rs). `rust-toolchain.toml` selects the
   channel and components; the minimum supported Rust version is the `rust-version`
   in `Cargo.toml`.
-- Git, for running the tool and its tests.
+- Git, for development and fixture tests. The installed CLI reads repositories
+  through gix and does not require a Git executable.
 
 ## Setup and run
 

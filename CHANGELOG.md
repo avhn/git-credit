@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
+### Added
+
+- Four-platform Homebrew formula publication to `avhn/homebrew-tap`, preserving the
+  existing fortix formula and README entries, with macOS and Linux install checks.
+- Deterministic amd64 and arm64 Debian packages, release checksums, and a signed
+  stable/main APT repository on GitHub Pages with retained package versions.
+- Manual Pages rebuild workflow, packaging guard tests, installation instructions
+  and signing-key rotation documentation.
+
+### Changed
+
+- Linux release binaries now use static musl instead of GNU/glibc targets for
+  Debian 11+ and Ubuntu 20.04+ portability. The GitHub Action prefers musl assets
+  while retaining manifest-based compatibility with v0.1.0 GNU archives.
+
 ## [0.1.0] - 2026-11-09
 
 ### Changed
@@ -105,5 +122,6 @@ All notable changes to this project are documented here. The format follows
   frequencies, prune provably inferior pairs, and index physical move prefixes.
   Scores and deterministic tie-breaking remain unchanged.
 
-[Unreleased]: https://github.com/avhn/git-credit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/avhn/git-credit/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/avhn/git-credit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/avhn/git-credit/releases/tag/v0.1.0

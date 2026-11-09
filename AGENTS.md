@@ -60,7 +60,18 @@ Local gate before any push: `cargo fmt --all --check && cargo lint && cargo test
 - **Tagged CLI releases.** `release.yml` runs on `v*` tag pushes, rather than only
   branch pushes: tagged releases are the norm for open source CLIs. Tag/workspace
   version equality, policy, static checks, tests and all target builds gate release.
-  Only its publication job can write repository contents.
+  Only its release publication and APT/Pages deployment jobs can write repository
+  contents. Homebrew publication uses a separate tap-scoped deploy key.
+- **Distribution jobs are channel-named.** `homebrew`, `apt`, `verify-homebrew` and
+  `verify-apt` distinguish publication from public installation checks. APT and
+  manual Pages jobs combine retained-branch preparation and deployment under one
+  shared lock. Only those deploy jobs receive Pages and OIDC write permissions.
+- **APT install verification uses distro containers.** Debian 12 and Ubuntu 22.04
+  containers on hosted runners have explicit memory/swap caps; readable distro
+  tags track security updates for these compatibility checks.
+- **Generated distribution commits match their channels.** Tap and retained Pages
+  commits use the `git-credit-release[bot]` identity and version-oriented messages;
+  source commits continue to require Conventional Commits.
 - **Badge publication is generated-only.** `badges.yml` publishes an orphan assets
   branch on main pushes, using an explicit branch lease and a current-main SHA
   check. No source commits are rewritten. The composite action uses the same

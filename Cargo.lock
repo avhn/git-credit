@@ -234,11 +234,11 @@ dependencies = [
 
 [[package]]
 name = "credit-badge"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "credit-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "imara-diff",
  "similar",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "credit-git"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "credit-core",
  "gix",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "git-credit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
