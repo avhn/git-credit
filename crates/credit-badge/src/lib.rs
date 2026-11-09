@@ -16,7 +16,10 @@
 use std::fmt::{self, Write};
 
 mod charts;
+mod timeline;
 mod treemap;
+
+pub use timeline::{Activity, Amount, Ownership, Timeline, activity_sparkline};
 
 /// One already privacy-filtered identity. The renderer never reads identities itself.
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +45,8 @@ pub struct Report {
     pub total_lines: f64,
     /// Flat directory totals at the requested analysis depth.
     pub directories: Vec<Directory>,
+    /// Optional historical series, indexed into this report's authors array.
+    pub timeline: Option<Timeline>,
 }
 
 /// One privacy-filtered directory, colored by its leading owner.
@@ -101,6 +106,10 @@ pub struct Badges {
     pub labor: String,
     /// Squarified flat directory ownership map.
     pub treemap: String,
+    /// Weekly labor columns, aggregated by month for long spans.
+    pub activity: String,
+    /// Absolute ownership along the main line of history.
+    pub history: String,
     /// Flat bus-factor badge.
     pub bus_factor: String,
     /// Safe unique filename stems paired with per-author SVG strings.
@@ -124,11 +133,14 @@ pub enum Error {
     InvalidShareTotal,
     /// A report or directory total/share is not finite or is out of range.
     InvalidDirectory,
+    /// Timeline dates, ordering, totals or author references are invalid.
+    InvalidTimeline,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::InvalidTimeline => "timeline dates, ordering, totals or author references are invalid",
             Self::InvalidDirectory => "report and directory totals must be finite and nonnegative, and directory shares in 0..=1",
             Self::InvalidTop => "top must be in 1..=1000",
             Self::InvalidWidth => "width must be in 200..=4096",
@@ -197,6 +209,8 @@ pub fn render(report: &Report, options: Options) -> Result<Badges, Error> {
         donut: charts::donut(&authors, total, options),
         labor: charts::labor(&authors, report, options),
         treemap: treemap::render(&authors, report, options),
+        activity: timeline::render(report, options, false),
+        history: timeline::render(report, options, true),
         bus_factor: flat("bus factor", &message, color),
         authors: author_badges,
         bus_factor_json: endpoint("bus factor", &message, color),
@@ -206,6 +220,7 @@ pub fn render(report: &Report, options: Options) -> Result<Badges, Error> {
 
 /// Validate all numbers before sorting, summing, rounding or producing geometry.
 fn validate(report: &Report, options: Options) -> Result<(), Error> {
+    timeline::validate(report)?;
     if !report.total_lines.is_finite()
         || report.total_lines < 0.0
         || report.directories.iter().any(|d| {

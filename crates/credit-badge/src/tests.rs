@@ -560,3 +560,183 @@ fn treemap_displays_repository_root_explicitly() {
     }
     assert_eq!(input.directories[0].path, ".");
 }
+
+/// Historical charts share palette ranks and reject malformed report references.
+#[test]
+fn timeline_charts_are_safe_deterministic_and_contrast_checked() {
+    let mut input = report();
+    input.authors[0].name = "<script>&\"\u{202e}\x1b[31m".into();
+    input.timeline = Some(Timeline {
+        activity: vec![Activity {
+            week_start: "2020-01-06T00:00:00+00:00".into(),
+            total: 1_000_001,
+            authors: vec![
+                Amount {
+                    author: 0,
+                    amount: 1_000_000,
+                },
+                Amount {
+                    author: 2,
+                    amount: 1,
+                },
+            ],
+        }],
+        ownership: vec![Ownership {
+            first_parent_index: 0,
+            author_timestamp: "2020-01-07T00:00:00+00:00".into(),
+            total: 1_000_001,
+            authors: vec![
+                Amount {
+                    author: 0,
+                    amount: 1_000_000,
+                },
+                Amount {
+                    author: 2,
+                    amount: 1,
+                },
+            ],
+        }],
+    });
+    for theme in [Theme::Light, Theme::Dark] {
+        for width in [200, 600] {
+            let options = Options {
+                top: 1,
+                width,
+                theme,
+            };
+            let assets = render(&input, options).unwrap();
+            assert_eq!(assets, render(&input, options).unwrap());
+            for chart in [&assets.activity, &assets.history] {
+                check_xml(chart);
+                assert!(chart.contains("&lt;script&gt;&amp;&quot;"));
+                assert!(!chart.contains('\u{202e}'));
+                assert!(!chart.contains('\x1b'));
+                assert!(chart.contains("Others"));
+                assert!(chart.contains(&format!("fill=\"{}\"", theme.neutral())));
+                assert!(chart.contains(&format!("fill=\"{}\"", theme.color(0))));
+                assert!(!chart.contains("NaN"));
+                let (bg, fg, muted) = theme.colors();
+                for (token, minimum) in [
+                    (fg, 4.5),
+                    (muted, 4.5),
+                    (theme.color(0), 3.0),
+                    (theme.neutral(), 3.0),
+                ] {
+                    assert!(chart.contains(token));
+                    let (a, b) = (luminance(bg), luminance(token));
+                    assert!((a.max(b) + 0.05) / (a.min(b) + 0.05) >= minimum);
+                }
+            }
+            // Ownership remains an ordinal sequence even when author dates go backwards.
+            let mut series = input.clone();
+            let sample = &mut series.timeline.as_mut().unwrap().ownership;
+            let mut next = sample[0].clone();
+            next.first_parent_index = 8;
+            next.author_timestamp = "2019-01-01".into();
+            sample.push(next);
+            assert!(
+                render(&series, options)
+                    .unwrap()
+                    .history
+                    .contains("<path d=\"M")
+            );
+            let empty = render(&Report::default(), options).unwrap();
+            for chart in [&empty.activity, &empty.history] {
+                check_xml(chart);
+                assert!(chart.contains("no data"));
+            }
+        }
+    }
+    for bad in [usize::MAX, 3] {
+        let mut invalid = input.clone();
+        invalid.timeline.as_mut().unwrap().activity[0].authors[0].author = bad;
+        assert_eq!(
+            render(&invalid, Options::default()),
+            Err(Error::InvalidTimeline)
+        );
+    }
+    input.timeline.as_mut().unwrap().activity[0].total += 1;
+    assert_eq!(
+        render(&input, Options::default()),
+        Err(Error::InvalidTimeline)
+    );
+}
+
+/// Pure timeline validation rejects duplicate identities, invalid weeks and overflow.
+#[test]
+fn timeline_validation_fails_closed() {
+    let base = Activity {
+        week_start: "2020-01-06".into(),
+        total: 1,
+        authors: vec![Amount {
+            author: 0,
+            amount: 1,
+        }],
+    };
+    for week in [
+        Activity {
+            week_start: "2020-01-07".into(),
+            ..base.clone()
+        },
+        Activity {
+            week_start: "2020-02-30".into(),
+            ..base.clone()
+        },
+        Activity {
+            authors: vec![
+                Amount {
+                    author: 0,
+                    amount: 0,
+                },
+                Amount {
+                    author: 0,
+                    amount: 1,
+                },
+            ],
+            ..base.clone()
+        },
+        Activity {
+            authors: vec![
+                Amount {
+                    author: 0,
+                    amount: u64::MAX,
+                },
+                Amount {
+                    author: 1,
+                    amount: 1,
+                },
+            ],
+            ..base.clone()
+        },
+    ] {
+        let input = Report {
+            timeline: Some(Timeline {
+                activity: vec![week],
+                ownership: vec![],
+            }),
+            ..report()
+        };
+        assert_eq!(
+            render(&input, Options::default()),
+            Err(Error::InvalidTimeline)
+        );
+    }
+    let mut input = Report {
+        timeline: Some(Timeline {
+            activity: vec![base.clone(), base],
+            ownership: vec![],
+        }),
+        ..report()
+    };
+    assert_eq!(
+        render(&input, Options::default()),
+        Err(Error::InvalidTimeline)
+    );
+    input.timeline.as_mut().unwrap().activity.clear();
+    assert!(
+        render(&input, Options::default())
+            .unwrap()
+            .activity
+            .contains("no data")
+    );
+}
