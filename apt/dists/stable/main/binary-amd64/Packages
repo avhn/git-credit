@@ -1,0 +1,18 @@
+Package: git-credit
+Architecture: amd64
+Version: 0.1.1-1
+Priority: optional
+Section: vcs
+Maintainer: Mert Dede <doganmertdede@gmail.com>
+Recommends: git
+Filename: pool/main/g/git-credit/git-credit_0.1.1-1_amd64.deb
+Size: 2244140
+MD5sum: 815f6ef32352389a32f3ddce79dcc711
+SHA1: ab615550b23ea10533ecbf60050e2dfe5840d55c
+SHA256: df9c68f7873072c01477bfb0e63eff8c2a2fe6c6e48bea5e246755ea4d31da00
+SHA512: e6e2438db1052e85f3bd3fffede45cc7c8c0129816f4ea0e2e5753cc4801c4a8011a4b5f4de42575249a6879d40f110d5c0518dc7119cf808614fcfed14cfbc6
+Homepage: https://github.com/avhn/git-credit
+Description: fair git authorship stats
+ Reports surviving meaningful code ownership and historical labor without
+ letting formatting or trivial edits transfer credit to the last editor.
+
