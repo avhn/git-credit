@@ -17,6 +17,12 @@ enum Style {
     Bar,
     /// Ownership/labor summary card.
     Card,
+    /// Proportional ownership donut.
+    Donut,
+    /// Grouped ownership and historical labor bars.
+    Labor,
+    /// Flat directory ownership treemap.
+    Treemap,
     /// Strict-majority bus-factor flat badge.
     BusFactor,
     /// One safely named flat badge per top contributor.
@@ -60,12 +66,15 @@ pub(crate) struct Badge {
     /// Maximum named contributors, with the rest grouped as others.
     #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=1000))]
     top: u32,
-    /// Summary-card theme.
+    /// Legacy option, accepted for compatibility; both themes are always written.
     #[arg(long, value_enum, default_value_t = Theme::Light)]
     theme: Theme,
-    /// Bar and card width in pixels.
+    /// Chart width in pixels.
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u32).range(200..=4096))]
     width: u32,
+    /// Directory breakdown depth for the treemap; zero disables directories.
+    #[arg(long, default_value_t = 1)]
+    depth: usize,
     /// Import an already privacy-filtered schema-version-1 analyze JSON report.
     #[arg(long = "from", value_name = "REPORT_JSON")]
     from: Option<PathBuf>,
@@ -83,6 +92,8 @@ struct Imported {
     head: String,
     commits_analyzed: u64,
     authors: Vec<ImportedAuthor>,
+    #[serde(default)]
+    directories: Vec<ImportedDirectory>,
 }
 
 /// Numeric presentation fields; identities have already been filtered by analysis.
@@ -91,6 +102,25 @@ struct ImportedAuthor {
     name: String,
     ownership_share: f64,
     labor: f64,
+    #[serde(default)]
+    ownership_lines: f64,
+    #[serde(default)]
+    email: String,
+}
+
+/// Directory fields from the existing public report, not a new JSON contract.
+#[derive(Deserialize)]
+struct ImportedDirectory {
+    path: String,
+    total_lines: f64,
+    authors: Vec<ImportedDirectoryAuthor>,
+}
+
+/// Directory shares resolve identities only through the privacy-filtered authors.
+#[derive(Deserialize)]
+struct ImportedDirectoryAuthor {
+    email: String,
+    share: f64,
 }
 
 /// Analyze through the existing validated boundary or import JSON, then render
@@ -112,8 +142,8 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
             granularity: None,
             no_bulk_discount: false,
             exclude: Vec::new(),
-            depth: 1,
-            no_color: true,
+            depth: args.depth,
+            terminal: output::Terminal::default(),
             quiet: args.verbose == 0,
             verbose: args.verbose,
         };
@@ -132,44 +162,48 @@ pub(crate) fn run(args: &Badge) -> anyhow::Result<()> {
         output::json(&report, &settings)?
     };
     let report = import(&source)?;
-    let assets = credit_badge::render(
-        &report,
-        Options {
-            top: usize::try_from(args.top)?,
-            width: args.width,
-            theme: match args.theme {
-                Theme::Light => credit_badge::Theme::Light,
-                Theme::Dark => credit_badge::Theme::Dark,
+    let mut files = vec![(
+        PathBuf::from("credit.json"),
+        format!("{}\n", source.trim_end()),
+    )];
+    // Theme selection is retained as a CLI spelling; fixed paired names are unambiguous.
+    let _ = args.theme;
+    for (theme, suffix) in [
+        (credit_badge::Theme::Light, ""),
+        (credit_badge::Theme::Dark, "-dark"),
+    ] {
+        let assets = credit_badge::render(
+            &report,
+            Options {
+                top: usize::try_from(args.top)?,
+                width: args.width,
+                theme,
             },
-        },
-    )?;
-    let mut files = vec![
-        (
-            PathBuf::from("credit.json"),
-            format!("{}\n", source.trim_end()),
-        ),
-        (PathBuf::from("bus-factor.json"), assets.bus_factor_json),
-        (
-            PathBuf::from("top-contributor.json"),
-            assets.top_contributor_json,
-        ),
-    ];
-    if matches!(args.style, Style::Bar | Style::All) {
-        files.push(("credit-bar.svg".into(), assets.bar));
-    }
-    if matches!(args.style, Style::Card | Style::All) {
-        files.push(("credit-card.svg".into(), assets.card));
-    }
-    if matches!(args.style, Style::BusFactor | Style::All) {
-        files.push(("bus-factor.svg".into(), assets.bus_factor));
-    }
-    if matches!(args.style, Style::Authors | Style::All) {
-        files.extend(
-            assets
-                .authors
-                .into_iter()
-                .map(|(stem, svg)| (PathBuf::from("authors").join(format!("{stem}.svg")), svg)),
-        );
+        )?;
+        if suffix.is_empty() {
+            files.push(("bus-factor.json".into(), assets.bus_factor_json));
+            files.push(("top-contributor.json".into(), assets.top_contributor_json));
+        }
+        for (style, name, svg) in [
+            (Style::Bar, "credit-bar", assets.bar),
+            (Style::Card, "credit-card", assets.card),
+            (Style::Donut, "credit-donut", assets.donut),
+            (Style::Labor, "credit-labor", assets.labor),
+            (Style::Treemap, "credit-treemap", assets.treemap),
+            (Style::BusFactor, "bus-factor", assets.bus_factor),
+        ] {
+            if args.style == style || args.style == Style::All {
+                files.push((format!("{name}{suffix}.svg").into(), svg));
+            }
+        }
+        if matches!(args.style, Style::Authors | Style::All) {
+            files.extend(assets.authors.into_iter().map(|(stem, svg)| {
+                (
+                    PathBuf::from("authors").join(format!("{stem}{suffix}.svg")),
+                    svg,
+                )
+            }));
+        }
     }
     write_files(&args.out_dir, &files, args.verbose > 0)
 }
@@ -189,6 +223,26 @@ fn import(source: &str) -> anyhow::Result<Report> {
     if report.head.len() != 40 || !report.head.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!("invalid report HEAD; expected a full 40-character SHA-1 object ID");
     }
+    let total_lines = report.authors.iter().map(|a| a.ownership_lines).sum();
+    let directories = report
+        .directories
+        .into_iter()
+        .map(|directory| {
+            let leader = directory.authors.iter().max_by(|a, b| {
+                a.share
+                    .total_cmp(&b.share)
+                    .then_with(|| b.email.cmp(&a.email))
+            });
+            let owner =
+                leader.and_then(|leader| report.authors.iter().find(|a| a.email == leader.email));
+            credit_badge::Directory {
+                path: directory.path,
+                total_lines: directory.total_lines,
+                owner: owner.map_or_else(|| "unknown".into(), |a| a.name.clone()),
+                owner_share: leader.map_or(0.0, |a| a.share),
+            }
+        })
+        .collect();
     Ok(Report {
         authors: report
             .authors
@@ -201,6 +255,8 @@ fn import(source: &str) -> anyhow::Result<Report> {
             .collect(),
         commits: report.commits_analyzed,
         head: report.head,
+        total_lines,
+        directories,
     })
 }
 
@@ -237,10 +293,23 @@ fn write_files(out: &Path, files: &[(PathBuf, String)], verbose: bool) -> anyhow
     check_path(out)?;
     let authors = out.join("authors");
     check_path(&authors)?;
-    let mut stale: Vec<_> = ["credit-bar.svg", "credit-card.svg", "bus-factor.svg"]
-        .iter()
-        .map(|name| out.join(name))
-        .collect();
+    let mut stale: Vec<_> = [
+        "credit-bar.svg",
+        "credit-bar-dark.svg",
+        "credit-card.svg",
+        "credit-card-dark.svg",
+        "bus-factor.svg",
+        "bus-factor-dark.svg",
+        "credit-donut.svg",
+        "credit-donut-dark.svg",
+        "credit-labor.svg",
+        "credit-labor-dark.svg",
+        "credit-treemap.svg",
+        "credit-treemap-dark.svg",
+    ]
+    .iter()
+    .map(|name| out.join(name))
+    .collect();
     if authors.is_dir() {
         for entry in fs::read_dir(&authors)? {
             let path = entry?.path();

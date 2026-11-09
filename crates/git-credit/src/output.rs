@@ -1,5 +1,8 @@
 //! Deterministic versioned JSON and terminal-safe plain text rendering.
 
+mod terminal;
+pub(crate) use terminal::{Terminal, render as terminal, warning};
+
 use crate::config::Settings;
 use credit_core::AuthorId;
 use credit_git::Report;
@@ -16,7 +19,7 @@ fn lines(parts: u64) -> f64 {
 /// Remove terminal control characters from untrusted author/path diagnostics.
 pub(crate) fn plain(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if c.is_control() || matches!(u32::from(c), 0x061c | 0x200e | 0x200f | 0x202a..=0x202e | 0x2066..=0x2069) { ' ' } else { c })
         .collect()
 }
 

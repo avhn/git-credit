@@ -62,9 +62,9 @@ struct Analyze {
     /// Directory breakdown depth; zero disables it.
     #[arg(long, default_value_t = 1)]
     depth: usize,
-    /// Disable color (output is currently always plain text; `NO_COLOR` is honored).
-    #[arg(long)]
-    no_color: bool,
+    /// Terminal presentation overrides, independent of analysis policy.
+    #[command(flatten)]
+    terminal: output::Terminal,
     /// Suppress nonessential diagnostics, not results or errors.
     #[arg(long, short = 'q', conflicts_with = "verbose")]
     quiet: bool,
@@ -102,7 +102,7 @@ fn run(args: &Analyze) -> anyhow::Result<()> {
     })?;
     if !args.quiet {
         for warning in &report.warnings {
-            eprintln!("warning: {}", output::plain(warning));
+            eprintln!("{}", output::warning(warning, &args.terminal));
         }
         if args.verbose > 0 {
             for diagnostic in &report.cache_diagnostics {
@@ -119,7 +119,7 @@ fn run(args: &Analyze) -> anyhow::Result<()> {
     let rendered = if args.json {
         output::json(&report, &settings)?
     } else {
-        output::table(&report)
+        output::terminal(&report, &args.terminal)
     };
     let mut stdout = std::io::stdout().lock();
     stdout.write_all(rendered.as_bytes())?;

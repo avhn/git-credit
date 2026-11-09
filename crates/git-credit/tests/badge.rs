@@ -227,9 +227,9 @@ fn selects_styles_and_rejects_bad_reports_before_writing() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert_eq!(files(output.path()).len(), 4);
+    assert_eq!(files(output.path()).len(), 5);
     assert!(
-        fs::read_to_string(output.path().join("credit-card.svg"))
+        fs::read_to_string(output.path().join("credit-card-dark.svg"))
             .unwrap()
             .contains("#161b22")
     );
@@ -295,4 +295,96 @@ fn refuses_relative_output_through_symlinked_component() {
     let result = cli(repo.path(), &["badge", "--out-dir", "docs/badges"]);
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(files(outside.path()), std::collections::BTreeMap::new());
+}
+
+/// Every managed light/dark asset is replaced or removed across identity/style changes.
+#[test]
+fn new_chart_pairs_remove_stale_names_after_rename_opt_out_and_style_change() {
+    let repo = fixture();
+    let output = tempfile::tempdir().unwrap();
+    let args = ["badge", "--out-dir", output.path().to_str().unwrap()];
+    assert!(cli(repo.path(), &args).status.success());
+    for name in [
+        "credit-bar",
+        "credit-card",
+        "credit-donut",
+        "credit-labor",
+        "credit-treemap",
+        "bus-factor",
+    ] {
+        for suffix in ["", "-dark"] {
+            assert!(output.path().join(format!("{name}{suffix}.svg")).is_file());
+        }
+    }
+    fs::write(
+        repo.path().join(".mailmap"),
+        "Renamed <hidden@example.test> Hidden Person <hidden@example.test>\n",
+    )
+    .unwrap();
+    git(
+        repo.path(),
+        &["add", ".mailmap"],
+        "Alice",
+        "alice@example.test",
+    );
+    git(
+        repo.path(),
+        &["commit", "-m", "mailmap"],
+        "Alice",
+        "alice@example.test",
+    );
+    assert!(cli(repo.path(), &args).status.success());
+    assert!(
+        !output
+            .path()
+            .join("authors/author-hidden-person-dark.svg")
+            .exists()
+    );
+    for bytes in files(output.path()).values() {
+        assert!(!String::from_utf8_lossy(bytes).contains("Hidden Person"));
+    }
+    fs::write(
+        repo.path().join(".git-credit.toml"),
+        "opt_out = [\"hidden@example.test\"]\n",
+    )
+    .unwrap();
+    assert!(cli(repo.path(), &args).status.success());
+    for bytes in files(output.path()).values() {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains("Renamed"));
+        assert!(!text.contains("hidden@example.test"));
+    }
+    let changed = [
+        "badge",
+        "--out-dir",
+        output.path().to_str().unwrap(),
+        "--style",
+        "donut",
+    ];
+    assert!(cli(repo.path(), &changed).status.success());
+    let remaining = files(output.path());
+    assert_eq!(remaining.len(), 5);
+    for path in remaining.keys() {
+        assert!(!path.to_string_lossy().contains("author-"));
+        assert!(!path.to_string_lossy().contains("treemap"));
+    }
+    assert!(output.path().join("credit-donut.svg").is_file());
+    assert!(output.path().join("credit-donut-dark.svg").is_file());
+    for style in ["labor", "treemap"] {
+        assert!(
+            cli(
+                repo.path(),
+                &[
+                    "badge",
+                    "--out-dir",
+                    output.path().to_str().unwrap(),
+                    "--style",
+                    style
+                ]
+            )
+            .status
+            .success()
+        );
+        assert!(!output.path().join("credit-donut.svg").exists());
+    }
 }

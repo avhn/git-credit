@@ -1238,3 +1238,89 @@ fn cache_controls_never_write_when_disabled_and_support_override() {
 
 #[path = "support/cache_overflow.rs"]
 mod cache_overflow;
+
+/// Explicit color and bar overrides remain deterministic and never enter JSON.
+#[test]
+fn terminal_visuals_respect_overrides_width_locale_and_json() {
+    let fixture = Fixture::new();
+    fixture.write("src/nested/a.rs", "first\nsecond\nthird\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    fixture.write("src/nested/b.rs", "fourth\n");
+    fixture.commit("<script>&\"Bob\"\u{202e}", "bob@example.test", "second");
+    let run = |flags: &[&str], no_color: Option<&str>, columns: &str, locale: &str| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_git-credit"));
+        command
+            .args(["analyze", "--granularity", "line"])
+            .arg(fixture.dir.path())
+            .args(flags)
+            .env_remove("NO_COLOR")
+            .env_remove("LC_ALL")
+            .env_remove("LC_CTYPE")
+            .env("LANG", locale)
+            .env("COLUMNS", columns);
+        if let Some(value) = no_color {
+            command.env("NO_COLOR", value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    let flags = ["--color", "always", "--bars", "--ascii"];
+    let first = run(&flags, None, "80", "C.UTF-8");
+    assert_eq!(first.stdout, run(&flags, None, "80", "C.UTF-8").stdout);
+    let text = String::from_utf8(first.stdout).unwrap();
+    assert!(text.contains("\x1b[1mAUTHOR"));
+    assert!(text.contains("75.0%"));
+    assert!(text.contains("###############....."));
+    assert!(!text.contains('\u{202e}'));
+    assert!(
+        !String::from_utf8_lossy(&run(&flags, Some("1"), "80", "C.UTF-8").stdout).contains('\x1b')
+    );
+    assert!(
+        !String::from_utf8_lossy(
+            &run(&["--color", "always", "--no-color"], None, "80", "C.UTF-8").stdout
+        )
+        .contains('\x1b')
+    );
+    let utf8 = run(&["--bars"], None, "80", "C.UTF-8");
+    assert!(String::from_utf8_lossy(&utf8.stdout).contains('█'));
+    let ascii = run(&["--bars"], None, "80", "C");
+    assert!(String::from_utf8_lossy(&ascii.stdout).contains('#'));
+    assert_ne!(ascii.stdout, run(&["--bars"], None, "50", "C").stdout);
+    assert_eq!(
+        fixture.cli(&[]).stdout,
+        run(&["--no-bars", "--color", "never"], None, "80", "C.UTF-8").stdout
+    );
+    assert_eq!(
+        fixture.cli(&["--json"]).stdout,
+        run(
+            &["--json", "--color", "always", "--bars"],
+            None,
+            "80",
+            "C.UTF-8"
+        )
+        .stdout
+    );
+    let tree = run(&["--tree", "--depth", "2", "--ascii"], None, "80", "C");
+    let tree = String::from_utf8(tree.stdout).unwrap();
+    assert!(tree.contains("+- src\n  +- nested  Alice 75.0%"), "{tree}");
+    assert_eq!(fixture.cli(&["--tree", "--json"]).status.code(), Some(2));
+}
+
+/// Root labels are descriptive in terminal trees without changing directory JSON.
+#[test]
+fn terminal_tree_labels_repository_root_without_changing_json_path() {
+    let fixture = Fixture::new();
+    fixture.write("root.rs", "first\nsecond\n");
+    fixture.commit("Alice", "alice@example.test", "root");
+    let output = fixture.cli(&["--tree", "--ascii"]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("+- (root)  Alice 100.0%"), "{text}");
+    assert!(!text.contains("+- ."));
+    assert_eq!(fixture.json(&[])["directories"][0]["path"], ".");
+}
