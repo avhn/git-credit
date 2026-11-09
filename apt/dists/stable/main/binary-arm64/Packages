@@ -16,3 +16,21 @@ Description: fair git authorship stats
  Reports surviving meaningful code ownership and historical labor without
  letting formatting or trivial edits transfer credit to the last editor.
 
+Package: git-credit
+Architecture: arm64
+Version: 0.2.0-1
+Priority: optional
+Section: vcs
+Maintainer: Mert Dede <doganmertdede@gmail.com>
+Recommends: git
+Filename: pool/main/g/git-credit/git-credit_0.2.0-1_arm64.deb
+Size: 2002524
+MD5sum: 0ee5aa720dd392e18f2e93b6bad31be0
+SHA1: 7b86e76a2c64a97bf96300b251d2ad3ce49bb5c3
+SHA256: 14c7c12c375e5e7d71a947bb6595c8a14c6605e6acc92c7c5653dfa055fa0469
+SHA512: 9a9170f081bfca9545691e740c2df4ccbeb39620fefdeed8401204ae2d31200fbaf7c6b9d0462bc4a76f9b38a9acde43fed59ac53562c21fa49a2b4c4b36100d
+Homepage: https://github.com/avhn/git-credit
+Description: fair git authorship stats
+ Reports surviving meaningful code ownership and historical labor without
+ letting formatting or trivial edits transfer credit to the last editor.
+
